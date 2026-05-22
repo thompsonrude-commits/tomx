@@ -1,16 +1,18 @@
 {
-  "appId": "com.tomxtractor.49ja.keygen",
-  "productName": "TomXtractor 49ja Keygen",
+  "appId": "com.tomxtractor.49ja",
+  "productName": "TomXtractor 49ja",
+  "copyright": "Copyright © 2026 TomXtractor Professional",
   "directories": {
-    "output": "admin-release"
+    "output": "app-release"
   },
   "files": [
-    "dist/admin/**/*",
+    "dist/main/**/*",
+    "dist/renderer/**/*",
     "resources/**/*",
     "package.json"
   ],
   "extraMetadata": {
-    "main": "dist/admin/admin/main.js"
+    "main": "dist/main/main.js"
   },
   "win": {
     "target": [
@@ -20,7 +22,7 @@
       }
     ],
     "icon": "resources/icon.ico",
-    "artifactName": "TomXtractor_49ja_Keygen_Setup.exe",
+    "artifactName": "TomXtractor_49ja_v${version}_Setup.exe",
     "publisherName": "TomXtractor"
   },
   "nsis": {
@@ -30,10 +32,15 @@
     "allowToChangeInstallationDirectory": true,
     "createDesktopShortcut": "always",
     "createStartMenuShortcut": true,
-    "shortcutName": "TomXtractor 49ja Keygen",
+    "shortcutName": "TomXtractor 49ja",
     "runAfterFinish": true,
     "installerIcon": "resources/icon.ico",
     "uninstallerIcon": "resources/icon.ico",
     "license": "resources/LICENSE.txt"
-  }
+  },
+  "asar": true,
+  "asarUnpack": [
+    "node_modules/sql.js/**",
+    "node_modules/chromium/**"
+  ]
 }

@@ -2,6 +2,8 @@ import initSqlJs, { Database as SqlJsDatabase } from 'sql.js';
 import * as path from 'path';
 import * as fs from 'fs';
 import { app } from 'electron';
+import { isLikelyRealEmail } from '../utils/emailValidator';
+
 
 let db: SqlJsDatabase;
 let dbPath: string;
@@ -33,9 +35,17 @@ export async function initDatabase() {
     console.log('[DB] SQL.js initialized. DB Path:', dbPath);
 
     if (fs.existsSync(dbPath)) {
-      const buffer = fs.readFileSync(dbPath);
-      db = new SQL.Database(buffer);
-      console.log('[DB] Existing database loaded.');
+      try {
+        const buffer = fs.readFileSync(dbPath);
+        db = new SQL.Database(buffer);
+        console.log('[DB] Existing database loaded.');
+      } catch (loadErr: any) {
+        console.warn('[DB] Database corrupted, recreating...', loadErr.message);
+        // Backup the corrupted file then start fresh
+        fs.renameSync(dbPath, dbPath + '.corrupted.' + Date.now());
+        db = new SQL.Database();
+        console.log('[DB] Fresh database created after corruption recovery.');
+      }
     } else {
       db = new SQL.Database();
       console.log('[DB] New database created.');
@@ -62,6 +72,13 @@ function migrateDatabase() {
   const hasReason = tableInfo.some(col => col.name === 'status_reason');
   if (!hasReason) {
     run("ALTER TABLE emails ADD COLUMN status_reason TEXT");
+    forceSave();
+  }
+
+  const mailingLogsInfo = query("PRAGMA table_info(mailing_logs)");
+  if (!mailingLogsInfo.some(col => col.name === 'delivery_location')) {
+    run("ALTER TABLE mailing_logs ADD COLUMN delivery_location TEXT DEFAULT 'Pending'");
+    run("ALTER TABLE mailing_logs ADD COLUMN status_details TEXT");
     forceSave();
   }
 }
@@ -154,6 +171,8 @@ function createTables() {
       recipient TEXT NOT NULL,
       subject TEXT,
       status TEXT,
+      delivery_location TEXT DEFAULT 'Pending',
+      status_details TEXT,
       error TEXT,
       sent_at TEXT DEFAULT (datetime('now')),
       FOREIGN KEY(smtp_id) REFERENCES smtps(id)
@@ -217,6 +236,12 @@ export function incrementDomainPages(domain: string) {
 
 export function addLog(message: string, level: string = 'info') {
   run('INSERT INTO crawl_logs (message, level) VALUES (?, ?)', [message, level]);
+  
+  // Force immediate save for critical start/stop/error logs to reflect in UI
+  const criticalTerms = ['started', 'engine', 'error', 'initializing', 'using browser'];
+  if (level === 'error' || level === 'success' || criticalTerms.some(term => message.toLowerCase().includes(term))) {
+    forceSave();
+  }
 }
 
 export function getEmails(options: { limit?: number, offset?: number, search?: string, status?: string } = {}): any[] {
@@ -336,6 +361,30 @@ export function resetDatabase() {
 }
 export function deleteEmail(id: number) { run('DELETE FROM emails WHERE id = ?', [id]); }
 
+/**
+ * Purge all emails that fail the strict validation check.
+ * Useful for cleaning up a database with many false positives.
+ */
+export function purgeJunkEmails(): { removed: number; remaining: number } {
+  const allEmails = query('SELECT id, email FROM emails');
+  let removedCount = 0;
+  
+  for (const row of allEmails) {
+    if (!isLikelyRealEmail(row.email)) {
+      db.run('DELETE FROM emails WHERE id = ?', [row.id]);
+      removedCount++;
+    }
+  }
+  
+  if (removedCount > 0) {
+    forceSave();
+  }
+  
+  const remaining = getEmailCount();
+  return { removed: removedCount, remaining };
+}
+
+
 export function updateEmailStatus(email: string, status: string, reason?: string) {
   run('UPDATE emails SET status = ?, status_reason = ? WHERE email = ?', [status, reason || null, email]);
 }
@@ -365,18 +414,20 @@ export function deleteSmtp(id: number) {
 }
 
 export function addMailingLog(log: any) {
-  run('INSERT INTO mailing_logs (smtp_id, recipient, subject, status, error) VALUES (?, ?, ?, ?, ?)',
+  run('INSERT INTO mailing_logs (smtp_id, recipient, subject, status, delivery_location, status_details, error) VALUES (?, ?, ?, ?, ?, ?, ?)',
       [
         log.smtpId ?? null, 
         log.recipient ?? '', 
         log.subject ?? '', 
         log.status ?? '', 
+        log.deliveryLocation ?? 'Pending',
+        log.statusDetails ?? null,
         log.error ?? null
       ]);
 }
 
 export function getMailingLogs(): any[] {
-  return query('SELECT * FROM mailing_logs ORDER BY id DESC');
+  return query('SELECT id, smtp_id as smtpId, recipient, subject, status, delivery_location as deliveryLocation, status_details as statusDetails, error, sent_at as sentAt FROM mailing_logs ORDER BY id DESC');
 }
 
 export function clearSmtps() {
@@ -425,4 +476,9 @@ export function deleteProxy(id: number) {
 
 export function getWorkingProxies(): string[] {
   return query('SELECT address FROM proxies WHERE working = 1').map(p => p.address);
+}
+
+export function deleteFailedProxies() {
+  run('DELETE FROM proxies WHERE working = 0 AND last_tested IS NOT NULL');
+  forceSave();
 }

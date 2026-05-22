@@ -116,29 +116,46 @@ export const InteractiveBrowserScraper: React.FC = () => {
                     // 1. Scroll down
                     window.scrollBy({ top: 800, behavior: 'smooth' });
 
-                    // 2. Look for "Next" or "Load More" buttons
+                    // 2. Automate "View Phone" or "Contact" buttons (common in IndiaMART/Justdial)
+                    const contactSelectors = [
+                        '.cnt_fluid', '.view-contact', '.contact-detail', 
+                        '[id^="contact_"]', '.m-lst-itm__btn', '.clck-act',
+                        'span:contains("View Mobile")', 'button:contains("Contact")'
+                    ];
+                    
+                    document.querySelectorAll(contactSelectors.join(',')).forEach(el => {
+                        if (el instanceof HTMLElement && el.innerText.toLowerCase().includes('phone') || el.innerText.toLowerCase().includes('contact')) {
+                             // el.click(); // Optional: might trigger too many popups, but good for detailed extraction
+                        }
+                    });
+
+                    // 3. Look for "Next" or "Load More" buttons
                     const selectors = [
                         'a#pnnext', // Google Next
-                        'button.load-more', 
-                        'a:contains("Next")',
-                        'button:contains("More")',
-                        'span:contains("Show more")',
-                        '.infinite-scroll-component__outer-container + button'
+                        'a.next', 'li.next a', '.pagination-next',
+                        'button.load-more', '.js-load-more',
+                        'a:contains("Next")', 'span:contains("Next")',
+                        'button:contains("More")', 'span:contains("Show more")',
+                        '.infinite-scroll-component__outer-container + button',
+                        'a[aria-label="Next"]', 'li.active + li a'
                     ];
 
                     let clicked = false;
-                    const buttons = Array.from(document.querySelectorAll('button, a, span'));
-                    const targetText = /next|load more|show more|view more|more results/i;
+                    const buttons = Array.from(document.querySelectorAll('button, a, span, li'));
+                    const targetText = /next|load more|show more|view more|more results|forward/i;
                     
                     const btn = buttons.find(b => {
                         const style = window.getComputedStyle(b);
-                        if (style.display === 'none' || style.visibility === 'hidden') return false;
-                        return targetText.test(b.innerText || '') || targetText.test(b.getAttribute('aria-label') || '');
+                        if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+                        const text = (b.innerText || b.getAttribute('aria-label') || '').toLowerCase();
+                        return targetText.test(text);
                     });
 
                     if (btn && btn instanceof HTMLElement) {
-                        btn.click();
-                        clicked = true;
+                        try {
+                            btn.click();
+                            clicked = true;
+                        } catch(e) {}
                     }
 
                     return { scrolled: true, clicked };

@@ -9,16 +9,108 @@ import { activateLicense } from '../license/activation';
 import { verifyEmail } from '../email/verifier';
 import { emailMailer } from '../email/mailer';
 import { fetchFreeProxies } from '../crawler/proxyFetcher';
+import { checkDomainDeliverability } from '../utils/emailValidator';
 
 const engine = new ExtractionEngine();
+
+// Quick proxy health test — returns only alive proxies
+async function quickTestProxies(proxies: string[]): Promise<string[]> {
+  const http = require('http');
+  const alive: string[] = [];
+  
+  const testOne = (proxy: string): Promise<boolean> => {
+    return new Promise((resolve) => {
+      try {
+        const clean = proxy.replace(/^https?:\/\//, '');
+        let host: string, port: number;
+        if (clean.includes('@')) {
+          const afterAt = clean.substring(clean.lastIndexOf('@') + 1);
+          [host] = afterAt.split(':');
+          port = parseInt(afterAt.split(':')[1]) || 8080;
+        } else {
+          const parts = clean.split(':');
+          host = parts[0];
+          port = parseInt(parts[1]) || 8080;
+        }
+        const headers: Record<string, string> = { Host: 'www.google.com' };
+        if (clean.includes('@')) {
+          const authPart = clean.split('@')[0];
+          headers['Proxy-Authorization'] = 'Basic ' + Buffer.from(authPart).toString('base64');
+        }
+        const req = http.request({ host, port, method: 'GET', path: 'http://www.google.com/', headers, timeout: 6000 }, (res: any) => {
+          req.destroy();
+          resolve((res.statusCode || 0) > 0);
+        });
+        req.on('error', () => resolve(false));
+        req.on('timeout', () => { req.destroy(); resolve(false); });
+        req.end();
+      } catch {
+        resolve(false);
+      }
+    });
+  };
+  
+  // Test in batches of 10
+  for (let i = 0; i < proxies.length; i += 10) {
+    const batch = proxies.slice(i, i + 10);
+    const results = await Promise.all(batch.map(p => testOne(p)));
+    
+    batch.forEach((proxy, idx) => {
+      if (results[idx]) {
+        alive.push(proxy);
+        db.updateProxyStatus(proxy, true, 0);
+      } else {
+        db.updateProxyStatus(proxy, false, 0);
+      }
+    });
+  }
+  
+  return alive;
+}
 
 export function registerIpcHandlers() {
   // Extraction
   ipcMain.handle('start-extraction', async (_event, config) => {
     const finalConfig = { ...config };
     if (config.proxyMode === 'rotating') {
-      finalConfig.proxies = db.getWorkingProxies();
+      // Pre-crawl proxy health check: verify proxies are actually alive
+      let proxies = db.getWorkingProxies();
+      
+      if (proxies.length > 0) {
+        db.addLog(`Testing ${proxies.length} stored proxies before crawl...`, 'info');
+        const liveProxies = await quickTestProxies(proxies);
+        // Delete any that failed — keep pool 100% clean
+        db.deleteFailedProxies();
+        
+        if (liveProxies.length === 0) {
+          db.addLog('All stored proxies are dead. Fetching fresh proxies...', 'warning');
+          await fetchFreeProxies();
+          const allProxies = db.getProxies().map((p: any) => p.address);
+          const freshLive = await quickTestProxies(allProxies.slice(0, 30));
+          db.deleteFailedProxies();
+          proxies = freshLive;
+        } else {
+          proxies = liveProxies;
+        }
+      } else {
+        // No working proxies at all — fetch fresh ones
+        db.addLog('No proxies found. Fetching fresh free proxies...', 'info');
+        await fetchFreeProxies();
+        const allProxies = db.getProxies().map((p: any) => p.address);
+        proxies = await quickTestProxies(allProxies.slice(0, 30));
+        db.deleteFailedProxies();
+      }
+
+      if (proxies.length > 0) {
+        db.addLog(`${proxies.length} live proxies ready for rotating engine`, 'success');
+      } else {
+        db.addLog('No live proxies available — starting engine with direct connection', 'warning');
+      }
+      finalConfig.proxies = proxies;
+    } else {
+      db.addLog('Starting extraction in direct mode (No proxies)', 'info');
     }
+    
     const win = BrowserWindow.getAllWindows()[0];
     engine.removeAllListeners('event');
     engine.on('event', (data) => {
@@ -26,6 +118,8 @@ export function registerIpcHandlers() {
         win.webContents.send('extraction-event', data);
       }
     });
+
+    db.addLog(`Initializing extraction engine with ${config.threads} threads...`, 'info');
     engine.start(finalConfig);
   });
 
@@ -71,7 +165,7 @@ export function registerIpcHandlers() {
   ipcMain.handle('verify-emails', async (_event, emails: string[]) => {
     return Promise.all(emails.map(async (email) => {
       const res = await verifyEmail(email);
-      db.updateEmailStatus(email, res.status, res.reason);
+      db.updateEmailStatus(email, res.status);
       return res;
     }));
   });
@@ -87,21 +181,37 @@ export function registerIpcHandlers() {
   
   ipcMain.handle('proxy-test', async (_event, proxy) => {
     const start = Date.now();
-    try {
-      // Simple connectivity test
-      const { default: https } = await import('https');
-      await new Promise<void>((resolve, reject) => {
-        const req = https.get('https://httpbin.org/ip', { timeout: 5000 }, (res) => {
-          res.on('data', () => {});
-          res.on('end', resolve);
-        });
-        req.on('error', reject);
-        req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
-      });
-      return { proxy, working: true, latency: Date.now() - start };
-    } catch {
-      return { proxy, working: false, latency: Date.now() - start };
+    const http = require('http');
+    const clean = proxy.replace(/^https?:\/\//, '');
+    let host: string, port: number;
+    if (clean.includes('@')) {
+      const afterAt = clean.substring(clean.lastIndexOf('@') + 1);
+      [host] = afterAt.split(':');
+      port = parseInt(afterAt.split(':')[1]) || 8080;
+    } else {
+      const parts = clean.split(':');
+      host = parts[0];
+      port = parseInt(parts[1]) || 8080;
     }
+    const headers: Record<string, string> = { Host: 'www.google.com' };
+    if (clean.includes('@')) {
+      headers['Proxy-Authorization'] = 'Basic ' + Buffer.from(clean.split('@')[0]).toString('base64');
+    }
+    const working: boolean = await new Promise((resolve) => {
+      try {
+        const req = http.request({ host, port, method: 'GET', path: 'http://www.google.com/', headers, timeout: 6000 }, (res: any) => {
+          req.destroy();
+          resolve((res.statusCode || 0) > 0);
+        });
+        req.on('error', () => resolve(false));
+        req.on('timeout', () => { req.destroy(); resolve(false); });
+        req.end();
+      } catch { resolve(false); }
+    });
+    const latency = Date.now() - start;
+    db.updateProxyStatus(proxy, working, latency);
+    if (!working) db.deleteFailedProxies();
+    return { proxy, working, latency };
   });
 
   // License
@@ -118,6 +228,12 @@ export function registerIpcHandlers() {
   ipcMain.handle('add-manual-emails', async (_event, { emails, sourcePage, domain }) => {
     let foundCount = 0;
     for (const email of emails) {
+      const emailDomain = email.split('@')[1];
+      if (!emailDomain) continue;
+      
+      const isDeliverable = await checkDomainDeliverability(emailDomain);
+      if (!isDeliverable) continue;
+
       if (db.addEmail(email, domain, sourcePage)) {
         foundCount++;
       }
@@ -126,6 +242,7 @@ export function registerIpcHandlers() {
   });
 
   // Data management
+  ipcMain.handle('purge-junk-emails', async () => db.purgeJunkEmails());
   ipcMain.handle('clear-emails', async () => db.clearEmails());
   ipcMain.handle('clear-logs', async () => db.clearLogs());
   ipcMain.handle('reset-database', async () => db.resetDatabase());
@@ -198,10 +315,10 @@ export function registerIpcHandlers() {
   ipcMain.handle('get-mailing-settings', async () => db.getMailingSettings());
   ipcMain.handle('save-mailing-setting', async (_event, { key, value }) => db.saveMailingSetting(key, value));
   
-  ipcMain.handle('start-mailing', async (_event, config) => {
+  ipcMain.handle('start-mailing', async (_event, config: any) => {
     const win = BrowserWindow.getAllWindows()[0];
     emailMailer.removeAllListeners('event');
-    emailMailer.on('event', (data) => {
+    emailMailer.on('event', (data: any) => {
       if (win && !win.isDestroyed()) {
         win.webContents.send('mailing-event', data);
       }
@@ -210,4 +327,16 @@ export function registerIpcHandlers() {
   });
   
   ipcMain.handle('stop-mailing', async () => emailMailer.stop());
+
+  // Export campaign report CSV
+  ipcMain.handle('export-campaign-report', async (_event, reportPath: string) => {
+    const win = BrowserWindow.getAllWindows()[0];
+    const saveResult = await dialog.showSaveDialog(win, {
+      defaultPath: `campaign_report_${Date.now()}.csv`,
+      filters: [{ name: 'CSV', extensions: ['csv'] }],
+    });
+    if (saveResult.canceled || !saveResult.filePath) return null;
+    fs.copyFileSync(reportPath, saveResult.filePath);
+    return saveResult.filePath;
+  });
 }

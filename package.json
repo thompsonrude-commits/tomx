@@ -1,7 +1,7 @@
 {
   "name": "tomxtractor-49ja",
-  "version": "1.0.5",
-  "description": "TomXtractor 49ja v1.0 - Professional Email Extraction Tool",
+  "version": "1.0.12",
+  "description": "TomXtractor 49ja v1.0.12 - Professional Global Email Extraction & Verified Mailing Tool",
   "main": "dist/main/main.js",
   "scripts": {
     "dev": "set ELECTRON_RUN_AS_NODE=&& concurrently \"npm run dev:renderer\" \"npm run dev:main\"",
@@ -13,8 +13,8 @@
     "build:admin:renderer": "vite build -c admin-vite.config.ts",
     "build:admin:main": "tsc -p tsconfig.admin.json",
     "build:admin": "npm run build:admin:renderer && npm run build:admin:main",
-    "package": "set ELECTRON_RUN_AS_NODE=&& npm run build && electron-builder --win",
-    "package:admin": "set ELECTRON_RUN_AS_NODE=&& npm run build:admin && electron-builder --win --config admin-builder.json",
+    "package": "npm run build && npx electron-builder --win --config builder.json",
+    "package:admin": "npm run build:admin && npx electron-builder --win --config admin-builder.json",
     "postinstall": "electron-builder install-app-deps"
   },
   "dependencies": {
@@ -54,57 +54,5 @@
     "typescript": "^5.7.2",
     "vite": "^6.0.3",
     "wait-on": "^8.0.1"
-  },
-  "build": {
-    "appId": "com.tomxtractor.49ja",
-    "productName": "TomXtractor 49ja",
-    "publish": [
-      {
-        "provider": "github",
-        "owner": "markped1",
-        "repo": "tomxtract"
-      }
-    ],
-    "files": [
-      "dist/**/*",
-      "resources/**/*",
-      "package.json"
-    ],
-    "directories": {
-      "output": "release"
-    },
-    "win": {
-      "target": [
-        {
-          "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        },
-        {
-          "target": "portable",
-          "arch": [
-            "x64"
-          ]
-        }
-      ],
-      "icon": "resources/icon.ico",
-      "publisherName": "TomXtractor"
-    },
-    "nsis": {
-      "oneClick": true,
-      "perMachine": false,
-      "allowElevation": false,
-      "allowToChangeInstallationDirectory": false,
-      "runAfterFinish": true,
-      "installerIcon": "resources/icon.ico",
-      "uninstallerIcon": "resources/icon.ico",
-      "installerHeaderIcon": "resources/icon.ico"
-    },
-    "asar": true,
-    "asarUnpack": [
-      "node_modules/sql.js/**",
-      "node_modules/chromium/**"
-    ]
   }
 }

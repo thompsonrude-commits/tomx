@@ -24,7 +24,7 @@ export const Settings: React.FC<SettingsProps> = ({ licenseStatus }) => {
             </svg>
             <div>
               <h3 className="text-lg font-bold text-cyber-accent glow-text">TomXtractor 49ja</h3>
-              <p className="text-xs text-gray-500">Version 1.0.0</p>
+              <p className="text-xs text-gray-500">Version 1.0.6</p>
             </div>
           </div>
           <p className="text-sm text-gray-400">Professional email extraction tool with advanced crawling capabilities.</p>

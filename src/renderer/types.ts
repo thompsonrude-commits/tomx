@@ -56,20 +56,29 @@ declare global {
       fetchFreeProxies: () => Promise<number>;
       addManualEmails: (data: { emails: string[], sourcePage: string, domain: string }) => Promise<number>;
       importEmailsFromFile: () => Promise<number>;
+      purgeJunkEmails: () => Promise<{ removed: number; remaining: number }>;
       getMailingSettings: () => Promise<Record<string, string>>;
       saveMailingSetting: (data: { key: string, value: string }) => Promise<void>;
     };
   }
 }
 
+export type ExtractionSource = 'google' | 'bing' | 'duckduckgo' | 'yahoo' | 'ask' | 'yellowpages' | 'craigslist' | 'justdial' | 'indiamart' | 'tradeindia' | 'yandex' | 'baidu' | 'naver' | 'seznam' | 'qwant' | 'brave' | 'startpage' | 'linkedin' | 'facebook' | 'instagram' | 'twitter' | 'github' | '4shared' | 'mediafire' | 'mega' | 'forums' | 'pdf' | 'excel' | 'word' | 'txt' | 'yellowpages_uk' | 'cylex_uk' | 'thomsonlocal' | 'yelp_uk' | 'yelp_us' | 'manta' | 'whitepages' | 'vconnect' | 'businesslist' | 'yellowpages_ng' | 'yellowpages_ae' | 'localsearch_ae' | 'yellowpages_ca' | 'yellowpages_au' | 'truelocal' | 'yellowpages_za' | 'brabys' | 'gelbeseiten_de' | 'wlw_de' | 'goyellow_de' | 'pagesjaunes_fr' | 'europages_fr' | 'paginegialle_it' | 'hotfrog_it' | 'paginasamarillas_es' | 'pyme_es' | 'telelistas_br' | 'guiamais_br' | 'apontador_br' | 'townpage_jp' | 'ekiten_jp' | 'goo_jp' | 'yellowpages_tr' | 'bulurum_tr' | 'canadaone' | '411_ca' | 'whitepages_au' | 'sayellow_za';
+
 export interface ExtractionConfig {
   keywords: string[];
+  location?: string;
+  city?: string;
   threads: number;
   depth: number;
   timeout: number;
-  proxyMode: 'none' | 'rotating';
-  proxies?: string[];
+  sources: ExtractionSource[];
+  deepFileSearch?: boolean;
+  autoRevealer?: boolean;
+  niches?: string[];
+  roles?: string[];
 }
+
 
 export interface ExtractionEvent {
   type: 'crawling' | 'email-found' | 'proxy-switched' | 'page-scanned' | 'error' | 'complete' | 'started' | 'paused' | 'stopped';

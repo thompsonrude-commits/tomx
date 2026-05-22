@@ -51,8 +51,8 @@ const App: React.FC = () => {
     );
   }
 
-  if (licenseStatus?.trialExpired && !licenseStatus.licensed) {
-    return <Activation onActivated={checkLicense} />;
+  if ((licenseStatus?.trialExpired && !licenseStatus.licensed) || currentPage === 'activate') {
+    return <Activation onActivated={() => { setCurrentPage('dashboard'); checkLicense(); }} />;
   }
 
   const renderPage = () => {

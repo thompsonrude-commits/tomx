@@ -1,17 +1,54 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
+import * as https from 'https';
 import { generateMachineId } from './fingerprint';
-import { createClient } from '@supabase/supabase-js';
-import { supabaseConfig } from './supabase-config';
+import { firebaseConfig } from './firebase-config';
 
-const isSupabaseConfigured =
-  supabaseConfig.url !== 'https://YOUR_PROJECT.supabase.co' &&
-  supabaseConfig.anonKey !== 'YOUR_ANON_KEY';
+const DB_URL = firebaseConfig.databaseURL.replace(/\/$/, '');
 
-const supabase = isSupabaseConfigured
-  ? createClient(supabaseConfig.url, supabaseConfig.anonKey)
-  : null;
+function httpsRequest(method: string, url: string, body?: string): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(url);
+    const options: https.RequestOptions = {
+      hostname: parsed.hostname,
+      path: parsed.pathname + parsed.search,
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(body ? { 'Content-Length': Buffer.byteLength(body) } : {}),
+      },
+    };
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          const parsed = JSON.parse(data);
+          if (parsed && typeof parsed === 'object' && parsed.error) {
+            reject(new Error(`Firebase error: ${parsed.error}`));
+          } else {
+            resolve(parsed);
+          }
+        } catch { resolve(data); }
+      });
+    });
+    req.on('error', reject);
+    if (body) req.write(body);
+    req.end();
+  });
+}
+
+async function dbGet(key: string): Promise<any> {
+  // Encode hyphens since Firebase RTDB path segments don't support them
+  const safeKey = key.replace(/-/g, '_');
+  return httpsRequest('GET', `${DB_URL}/licenses/${safeKey}.json`);
+}
+
+async function dbPatch(key: string, record: Record<string, any>): Promise<void> {
+  const safeKey = key.replace(/-/g, '_');
+  await httpsRequest('PATCH', `${DB_URL}/licenses/${safeKey}.json`, JSON.stringify(record));
+}
 
 const TRIAL_DIR = 'C:\\ProgramData\\TomXtractor';
 const LICENSE_FILE = path.join(TRIAL_DIR, 'license.dat');
@@ -36,91 +73,43 @@ export async function activateLicense(licenseKey: string): Promise<{ success: bo
     const machineId = await generateMachineId();
     const key = licenseKey.toUpperCase();
 
-    if (isSupabaseConfigured && supabase) {
-      const { data, error } = await supabase
-        .from('licenses')
-        .select('*')
-        .eq('key', key)
-        .single();
+    const doc = await dbGet(key);
 
-      if (error || !data) {
-        return { success: false, message: 'Invalid license key. Please check your key or contact support.' };
-      }
-
-      if (data.status === 'revoked') {
-        return { success: false, message: 'This license key has been revoked. Please contact support.' };
-      }
-
-      if (data.machine_id && data.machine_id !== machineId) {
-        return { success: false, message: 'This license key is already locked to another machine.' };
-      }
-
-      // Lock key to this machine on first activation
-      if (!data.machine_id || data.status === 'available') {
-        const updates: any = {
-          machine_id: machineId,
-          status: 'active',
-          activated_at: new Date().toISOString(),
-        };
-        
-        const { error: updateError } = await supabase
-          .from('licenses')
-          .update(updates)
-          .eq('key', key);
-
-        if (updateError) {
-          return { success: false, message: 'Failed to activate license. Please try again.' };
-        }
-      }
-
-      // Calculate expiration if demo
-      let expiresAt: string | null = null;
-      if (data.is_demo && data.duration_days > 0) {
-        const activationDate = data.activated_at ? new Date(data.activated_at) : new Date();
-        const expiryDate = new Date(activationDate.getTime() + data.duration_days * 24 * 60 * 60 * 1000);
-        expiresAt = expiryDate.toISOString();
-      }
-
-      // Store activation locally
-      if (!fs.existsSync(TRIAL_DIR)) fs.mkdirSync(TRIAL_DIR, { recursive: true });
-
-      const licenseData = { 
-        activated: true, 
-        key, 
-        machineId, 
-        activatedAt: new Date().toISOString(),
-        isDemo: data.is_demo || false,
-        expiresAt
-      };
-
-      fs.writeFileSync(
-        LICENSE_FILE,
-        encrypt(JSON.stringify(licenseData)),
-        'utf-8'
-      );
-    } else {
-      // Offline fallback
-      const machineHash = crypto
-        .createHmac('sha256', 'TX49JA-LICENSE-SECRET')
-        .update(machineId)
-        .digest('hex')
-        .substring(0, 16)
-        .toUpperCase();
-
-      const expectedKey = `${machineHash.substring(0, 4)}-${machineHash.substring(4, 8)}-${machineHash.substring(8, 12)}-${machineHash.substring(12, 16)}`;
-
-      if (key !== expectedKey) {
-        return { success: false, message: 'Invalid license key for this machine.' };
-      }
-
-      // Store offline activation
-      if (!fs.existsSync(TRIAL_DIR)) fs.mkdirSync(TRIAL_DIR, { recursive: true });
-      fs.writeFileSync(
-        LICENSE_FILE,
-        encrypt(JSON.stringify({ activated: true, key, machineId, activatedAt: new Date().toISOString() })),
-        'utf-8'
-      );
+    if (!doc) {
+      return { success: false, message: 'Invalid license key. Please check your key or contact support.' };
     }
+
+    if (doc.status === 'revoked') {
+      return { success: false, message: 'This license key has been revoked. Please contact support.' };
+    }
+
+    if (doc.status === 'active' && doc.machine_id && doc.machine_id !== machineId) {
+      return { success: false, message: 'This license key is already locked to another machine.' };
+    }
+
+    if (doc.status === 'available' && doc.machine_id && doc.machine_id !== machineId) {
+      return { success: false, message: 'This license key was generated for a different machine.' };
+    }
+
+    const activatedAt = new Date().toISOString();
+    let expiresAt: string | null = null;
+    if (doc.duration_days) {
+      const d = new Date();
+      d.setDate(d.getDate() + Number(doc.duration_days));
+      expiresAt = d.toISOString();
+    }
+
+    await dbPatch(key, {
+      machine_id: machineId,
+      status: 'active',
+      activated_at: activatedAt,
+      expires_at: expiresAt,
+    });
+
+    if (!fs.existsSync(TRIAL_DIR)) fs.mkdirSync(TRIAL_DIR, { recursive: true });
+    fs.writeFileSync(LICENSE_FILE, encrypt(JSON.stringify({
+      activated: true, key, machineId, activatedAt, expiresAt,
+    })), 'utf-8');
 
     return { success: true, message: 'License activated successfully!' };
   } catch (err: any) {

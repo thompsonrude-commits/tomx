@@ -2,17 +2,79 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { GlowButton } from '../components/GlowButton';
 import { LiveFeed } from '../components/LiveFeed';
 import { DataTable } from '../components/DataTable';
-import { ExtractionConfig, ExtractionEvent, EmailRecord } from '../types';
+import { ExtractionConfig, ExtractionEvent, EmailRecord, ExtractionSource } from '../types';
+import { SOURCES_BY_COUNTRY } from '../data/locationSources';
+
+const COUNTRIES = [
+  { code: '', name: 'Global (No specific location)' },
+  { code: 'US', name: 'United States' },
+  { code: 'GB', name: 'United Kingdom' },
+  { code: 'NG', name: 'Nigeria' },
+  { code: 'AE', name: 'United Arab Emirates' },
+  { code: 'IN', name: 'India' },
+  { code: 'RU', name: 'Russia' },
+  { code: 'CN', name: 'China' },
+  { code: 'KR', name: 'South Korea' },
+  { code: 'DE', name: 'Germany' },
+  { code: 'FR', name: 'France' },
+  { code: 'IT', name: 'Italy' },
+  { code: 'ES', name: 'Spain' },
+  { code: 'CA', name: 'Canada' },
+  { code: 'AU', name: 'Australia' },
+  { code: 'BR', name: 'Brazil' },
+  { code: 'ZA', name: 'South Africa' },
+  { code: 'CZ', name: 'Czech Republic' },
+  { code: 'JP', name: 'Japan' },
+  { code: 'TR', name: 'Turkey' }
+];
+
+const CollapsibleSection: React.FC<{ 
+  title: string; 
+  titleClass?: string; 
+  defaultOpen?: boolean; 
+  children: React.ReactNode;
+  icon?: React.ReactNode;
+}> = ({ title, titleClass, defaultOpen = false, children, icon }) => {
+  const [isOpen, setIsOpen] = useState(defaultOpen);
+  return (
+    <div className="border-b border-gray-800/50 pb-2 mb-2 last:border-0 last:pb-0 last:mb-0">
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className="w-full flex items-center justify-between py-1.5 group"
+      >
+        <div className="flex items-center gap-2">
+          {icon}
+          <span className={`text-[10px] uppercase tracking-widest font-bold transition-colors ${titleClass || 'text-gray-500'} group-hover:text-white`}>
+            {title}
+          </span>
+        </div>
+        <svg
+          className={`w-3.5 h-3.5 text-gray-600 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+      {isOpen && <div className="mt-2 animate-fade-in">{children}</div>}
+    </div>
+  );
+};
 
 export const Extract: React.FC = () => {
   const [keywords, setKeywords] = useState<string[]>([]);
   const [newKeyword, setNewKeyword] = useState('');
   const [config, setConfig] = useState<ExtractionConfig>({
     keywords: [],
+    location: '',
     threads: 3,
     depth: 5,
     timeout: 30,
     proxyMode: 'rotating',
+    sources: ['google', 'bing', 'duckduckgo', 'yahoo'] as ExtractionSource[],
+    niches: [],
+    roles: [],
   });
   const [isRunning, setIsRunning] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
@@ -53,6 +115,34 @@ export const Extract: React.FC = () => {
     };
   }, []);
 
+  // Handle Dynamic Source Refresh on Location Change
+  useEffect(() => {
+    const currentLoc = config.location || 'Global (No specific location)';
+    const countryData = SOURCES_BY_COUNTRY[currentLoc] || SOURCES_BY_COUNTRY['Global (No specific location)'];
+    
+    // 1. Identify all country-specific source IDs across ALL countries
+    const allLocalizedIds = Object.values(SOURCES_BY_COUNTRY).flatMap(c => [
+        ...c.b2b.map(s => s.id),
+        ...c.localEngines.map(s => s.id)
+    ]);
+    
+    // 2. Remove all localized IDs from current selection
+    // 3. Add the defaults for the NEW country (if desired, or just let user pick)
+    const filteredSources = config.sources.filter(s => !allLocalizedIds.includes(s));
+    
+    // Optionally auto-select the new country's B2B sources if none are selected
+    const newDefaults = [
+        ...countryData.b2b.map(s => s.id),
+        ...countryData.localEngines.map(s => s.id)
+    ].slice(0, 3); // Auto-select top 3 for convenience
+
+    setConfig(prev => ({ 
+        ...prev, 
+        sources: [...new Set([...filteredSources, ...newDefaults])]
+    }));
+
+  }, [config.location]);
+
   const loadEmails = async () => {
     try {
       if (window.electronAPI) {
@@ -91,7 +181,7 @@ export const Extract: React.FC = () => {
     try {
       setIsRunning(true);
       setEvents([]);
-      const extractionConfig = { ...config, keywords };
+      const extractionConfig = { ...config, keywords, sources: config.sources };
       if (window.electronAPI) {
         await window.electronAPI.startExtraction(extractionConfig);
       }
@@ -208,10 +298,35 @@ export const Extract: React.FC = () => {
               <svg className="w-4 h-4 text-cyber-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 11-3 0m3 0a1.5 1.5 0 10-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-9.75 0h9.75" />
               </svg>
-              Extraction Settings
             </h3>
 
             <div className="space-y-3">
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">Target Country / Location</label>
+                <select
+                  value={config.location}
+                  onChange={(e) => setConfig({ ...config, location: e.target.value })}
+                  className="w-full bg-cyber-bg border border-gray-700 rounded-lg px-3 py-2 text-sm text-cyber-text focus:outline-none focus:border-cyber-accent/50"
+                >
+                  {COUNTRIES.map(c => (
+                    <option key={c.code} value={c.name}>{c.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              {config.location && config.location !== 'Global (No specific location)' && (
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">City / State <span className="text-gray-600">(optional)</span></label>
+                  <input
+                    type="text"
+                    value={config.city || ''}
+                    onChange={(e) => setConfig({ ...config, city: e.target.value })}
+                    placeholder={`e.g. Lagos, Mumbai, New York...`}
+                    className="w-full bg-cyber-bg border border-gray-700 rounded-lg px-3 py-2 text-sm text-cyber-text focus:outline-none focus:border-cyber-accent/50 placeholder-gray-700"
+                  />
+                </div>
+              )}
+
               <div>
                 <label className="text-xs text-gray-500 mb-1 block">Threads</label>
                 <input
@@ -256,6 +371,503 @@ export const Extract: React.FC = () => {
                   <option value="rotating">Rotating</option>
                 </select>
               </div>
+
+              {/* Source Selection */}
+              <div className="pt-2 border-t border-gray-700/50 mt-2">
+                <label className="text-xs font-bold text-gray-500 uppercase mb-3 block">Search Sources</label>
+                
+                <div className="space-y-4">
+                  <CollapsibleSection title="Primary Search Sources" titleClass="text-cyber-accent" defaultOpen={true}>
+                    <div className="grid grid-cols-2 gap-2">
+                        {(['google', 'bing', 'duckduckgo', 'yahoo', 'ask', 'brave', 'startpage'] as ExtractionSource[]).map((s) => (
+                          <label key={s} className="flex items-center gap-2 text-xs text-gray-400 cursor-pointer hover:text-gray-200 transition-colors">
+                            <input
+                              type="checkbox"
+                              checked={config.sources.includes(s)}
+                              onChange={(e) => {
+                                const sources = e.target.checked 
+                                  ? [...config.sources, s]
+                                  : config.sources.filter(x => x !== s);
+                                setConfig({ ...config, sources });
+                              }}
+                              className="rounded bg-cyber-bg border-gray-700 text-cyber-accent focus:ring-0"
+                            />
+                            {s.charAt(0).toUpperCase() + s.slice(1)}
+                          </label>
+                        ))}
+                      </div>
+                  </CollapsibleSection>
+                  </div>
+
+                  <CollapsibleSection title="Local Search Engines" titleClass="text-pink-500">
+                    <div className="grid grid-cols-2 gap-2">
+                       { (SOURCES_BY_COUNTRY[config.location || 'Global (No specific location)']?.localEngines || []).length === 0 ? (
+                          <p className="text-[10px] text-gray-700 italic col-span-2">No local engines for this region.</p>
+                       ) : (
+                         (SOURCES_BY_COUNTRY[config.location || 'Global (No specific location)']?.localEngines || []).map((s) => (
+                           <label key={s.id} className="flex items-center gap-2 text-xs text-gray-400 cursor-pointer hover:text-gray-200 transition-colors">
+                             <input
+                               type="checkbox"
+                               checked={config.sources.includes(s.id)}
+                               onChange={(e) => {
+                                 const sources = e.target.checked 
+                                   ? [...config.sources, s.id]
+                                   : config.sources.filter(x => x !== s.id);
+                                 setConfig({ ...config, sources });
+                               }}
+                               className="rounded bg-cyber-bg border-gray-700 text-pink-500 focus:ring-0"
+                             />
+                             {s.label}
+                           </label>
+                         ))
+                       )}
+                    </div>
+                  </CollapsibleSection>
+
+                  <CollapsibleSection title="B2B & Directories" titleClass="text-yellow-500">
+                    <div className="grid grid-cols-2 gap-2">
+                       { (SOURCES_BY_COUNTRY[config.location || 'Global (No specific location)']?.b2b || []).map((s) => (
+                        <label key={s.id} className="flex items-center gap-2 text-xs text-gray-400 cursor-pointer hover:text-gray-200 transition-colors">
+                          <input
+                            type="checkbox"
+                            checked={config.sources.includes(s.id)}
+                            onChange={(e) => {
+                              const sources = e.target.checked 
+                                ? [...config.sources, s.id]
+                                : config.sources.filter(x => x !== s.id);
+                              setConfig({ ...config, sources });
+                            }}
+                            className="rounded bg-cyber-bg border-gray-700 text-yellow-500 focus:ring-0"
+                          />
+                          {s.label}
+                        </label>
+                      ))}
+                    </div>
+                  </CollapsibleSection>
+
+                  <CollapsibleSection title="Classifieds" titleClass="text-green-500">
+                    <label className="flex items-center gap-2 text-xs text-gray-400 cursor-pointer hover:text-gray-200 transition-colors">
+                      <input
+                        type="checkbox"
+                        checked={config.sources.includes('craigslist')}
+                        onChange={(e) => {
+                          const sources = e.target.checked 
+                            ? [...config.sources, 'craigslist']
+                            : config.sources.filter(x => x !== 'craigslist');
+                          setConfig({ ...config, sources });
+                        }}
+                        className="rounded bg-cyber-bg border-gray-700 text-cyber-accent focus:ring-0"
+                      />
+                      Craigslist (Global)
+                    </label>
+                  </CollapsibleSection>
+
+                  {/* New Mega Categories */}
+                  <CollapsibleSection title="Social Media Directories" titleClass="text-orange-500">
+                    <div className="grid grid-cols-2 gap-2">
+                       {([
+                         { id: 'linkedin', label: 'LinkedIn' },
+                         { id: 'facebook', label: 'Facebook' },
+                         { id: 'instagram', label: 'Instagram' },
+                         { id: 'twitter', label: 'Twitter (X)' }
+                       ] as { id: ExtractionSource, label: string }[]).map((s) => (
+                        <label key={s.id} className="flex items-center gap-2 text-xs text-gray-400 cursor-pointer hover:text-gray-200 transition-colors">
+                          <input
+                            type="checkbox"
+                            checked={config.sources.includes(s.id)}
+                            onChange={(e) => {
+                              const sources = e.target.checked 
+                                ? [...config.sources, s.id]
+                                : config.sources.filter(x => x !== s.id);
+                              setConfig({ ...config, sources });
+                            }}
+                            className="rounded bg-cyber-bg border-gray-700 text-cyber-accent focus:ring-0"
+                          />
+                          {s.label}
+                        </label>
+                      ))}
+                    </div>
+                  </CollapsibleSection>
+
+                  <CollapsibleSection title="Sharing & Forums" titleClass="text-blue-500">
+                    <div className="grid grid-cols-2 gap-2">
+                       {([
+                         { id: 'github', label: 'GitHub' },
+                         { id: '4shared', label: '4Shared' },
+                         { id: 'mega', label: 'Mega.nz' },
+                         { id: 'forums', label: 'Popular Forums' }
+                       ] as { id: ExtractionSource, label: string }[]).map((s) => (
+                        <label key={s.id} className="flex items-center gap-2 text-xs text-gray-400 cursor-pointer hover:text-gray-200 transition-colors">
+                          <input
+                            type="checkbox"
+                            checked={config.sources.includes(s.id)}
+                            onChange={(e) => {
+                              const sources = e.target.checked 
+                                ? [...config.sources, s.id]
+                                : config.sources.filter(x => x !== s.id);
+                              setConfig({ ...config, sources });
+                            }}
+                            className="rounded bg-cyber-bg border-gray-700 text-cyber-accent focus:ring-0"
+                          />
+                          {s.label}
+                        </label>
+                      ))}
+                    </div>
+                  </CollapsibleSection>
+
+                  <CollapsibleSection title="Deep File Search" titleClass="text-purple-500">
+                    <div className="grid grid-cols-2 gap-2">
+                       {([
+                         { id: 'pdf', label: 'PDF Documents' },
+                         { id: 'excel', label: 'Excel/XLSX' },
+                         { id: 'word', label: 'Word/DOCX' },
+                         { id: 'txt', label: 'Text/Logs' }
+                       ] as { id: ExtractionSource, label: string }[]).map((s) => (
+                        <label key={s.id} className="flex items-center gap-2 text-xs text-gray-400 cursor-pointer hover:text-gray-200 transition-colors">
+                          <input
+                            type="checkbox"
+                            checked={config.sources.includes(s.id)}
+                            onChange={(e) => {
+                              const sources = e.target.checked 
+                                ? [...config.sources, s.id]
+                                : config.sources.filter(x => x !== s.id);
+                              setConfig({ ...config, sources });
+                            }}
+                            className="rounded bg-cyber-bg border-gray-700 text-cyber-accent focus:ring-0"
+                          />
+                          {s.label}
+                        </label>
+                      ))}
+                    </div>
+                  </CollapsibleSection>
+                </div>
+
+                {/* Advanced Automation Toggles */}
+                <div className="mt-4 pt-4 border-t border-gray-800 space-y-3">
+                   <label className="flex items-center justify-between group cursor-pointer">
+                      <div>
+                        <p className="text-xs font-bold text-cyber-accent group-hover:text-white transition-colors">B2B Action Revealer</p>
+                        <p className="text-[10px] text-gray-500">Auto-clicks "View Contact" on YellowPages/Directories</p>
+                      </div>
+                      <input 
+                        type="checkbox"
+                        checked={config.autoRevealer}
+                        onChange={(e) => setConfig({ ...config, autoRevealer: e.target.checked })}
+                        className="rounded bg-cyber-bg border-gray-700 text-cyber-accent focus:ring-0"
+                      />
+                   </label>
+                   
+                   <label className="flex items-center justify-between group cursor-pointer">
+                      <div>
+                        <p className="text-xs font-bold text-blue-400 group-hover:text-white transition-colors">Deep Document Scraper</p>
+                        <p className="text-[10px] text-gray-500">Search inside files (PDF, Word, Excel) during crawl</p>
+                      </div>
+                      <input 
+                        type="checkbox"
+                        checked={config.deepFileSearch}
+                        onChange={(e) => setConfig({ ...config, deepFileSearch: e.target.checked })}
+                        className="rounded bg-cyber-bg border-gray-700 text-blue-400 focus:ring-0"
+                      />
+                   </label>
+                </div>
+
+                {/* Professional Sector & Role Targeting */}
+                <div className="mt-4 pt-4 border-t border-gray-800 space-y-6">
+                  {/* Niches Section */}
+                  <div>
+                    <h4 className="text-[11px] text-cyan-400 font-bold uppercase tracking-wider mb-3 flex items-center gap-2">
+                       <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 shadow-[0_0_8px_cyan]"></span>
+                       Targeted Sectors (Niches)
+                    </h4>
+                    
+                    <div className="max-h-[500px] overflow-y-auto no-scrollbar space-y-1 pr-1">
+                      {/* Public & Health */}
+                      <CollapsibleSection title="Public, Health & Education">
+                        <div className="grid grid-cols-2 gap-2">
+                          {([
+                             { id: 'schools', label: 'Schools/Uni' },
+                             { id: 'hospitals', label: 'Hospitals' },
+                             { id: 'government', label: 'Government' },
+                             { id: 'nonprofit', label: 'Non-Profit/NGO' },
+                             { id: 'agencies', label: 'Agencies' },
+                             { id: 'library', label: 'Libraries' },
+                             { id: 'police', label: 'Law Enforcement' }
+                          ]).map((n) => (
+                            <label key={n.id} className="flex items-center gap-2 text-xs text-gray-400 cursor-pointer hover:text-gray-200 transition-colors">
+                              <input
+                                type="checkbox"
+                                checked={config.niches?.includes(n.id)}
+                                onChange={(e) => {
+                                  const niches = e.target.checked 
+                                    ? [...(config.niches || []), n.id]
+                                    : (config.niches || []).filter(x => x !== n.id);
+                                  setConfig({ ...config, niches });
+                                }}
+                                className="rounded bg-cyber-bg border-gray-700 text-cyan-400 focus:ring-0"
+                              />
+                              {n.label}
+                            </label>
+                          ))}
+                        </div>
+                      </CollapsibleSection>
+
+                      <CollapsibleSection title="Tech, Media & Marketing">
+                        <div className="grid grid-cols-2 gap-2">
+                          {([
+                             { id: 'software', label: 'Software/SaaS' },
+                             { id: 'it_services', label: 'IT Services' },
+                             { id: 'ai_robotics', label: 'AI & Robotics' },
+                             { id: 'marketing', label: 'Marketing/Ad' },
+                             { id: 'media', label: 'News & Media' }
+                          ]).map((n) => (
+                            <label key={n.id} className="flex items-center gap-2 text-xs text-gray-400 cursor-pointer hover:text-gray-200 transition-colors">
+                               <input
+                                type="checkbox"
+                                checked={config.niches?.includes(n.id)}
+                                onChange={(e) => {
+                                  const niches = e.target.checked 
+                                    ? [...(config.niches || []), n.id]
+                                    : (config.niches || []).filter(x => x !== n.id);
+                                  setConfig({ ...config, niches });
+                                }}
+                                className="rounded bg-cyber-bg border-gray-700 text-cyan-400 focus:ring-0"
+                              />
+                              {n.label}
+                            </label>
+                          ))}
+                        </div>
+                      </CollapsibleSection>
+
+                      <CollapsibleSection title="Finance, Legal & Realty">
+                        <div className="grid grid-cols-2 gap-2">
+                          {([
+                             { id: 'banks', label: 'Banks/Finance' },
+                             { id: 'insurance', label: 'Insurance' },
+                             { id: 'investment', label: 'Investments' },
+                             { id: 'real_estate', label: 'Real Estate' },
+                             { id: 'law_firms', label: 'Law Firms' }
+                          ]).map((n) => (
+                            <label key={n.id} className="flex items-center gap-2 text-xs text-gray-400 cursor-pointer hover:text-gray-200 transition-colors">
+                               <input
+                                type="checkbox"
+                                checked={config.niches?.includes(n.id)}
+                                onChange={(e) => {
+                                  const niches = e.target.checked 
+                                    ? [...(config.niches || []), n.id]
+                                    : (config.niches || []).filter(x => x !== n.id);
+                                  setConfig({ ...config, niches });
+                                }}
+                                className="rounded bg-cyber-bg border-gray-700 text-cyan-400 focus:ring-0"
+                              />
+                              {n.label}
+                            </label>
+                          ))}
+                        </div>
+                      </CollapsibleSection>
+
+                      <CollapsibleSection title="Industrial & Logistics">
+                        <div className="grid grid-cols-2 gap-2">
+                          {([
+                             { id: 'construction', label: 'Construction' },
+                             { id: 'manufacturing', label: 'Manufacturing' },
+                             { id: 'energy', label: 'Energy/Utility' },
+                             { id: 'mining', label: 'Mining/Resources' },
+                             { id: 'logistics', label: 'Logistics' }
+                          ]).map((n) => (
+                            <label key={n.id} className="flex items-center gap-2 text-xs text-gray-400 cursor-pointer hover:text-gray-200 transition-colors">
+                               <input
+                                type="checkbox"
+                                checked={config.niches?.includes(n.id)}
+                                onChange={(e) => {
+                                  const niches = e.target.checked 
+                                    ? [...(config.niches || []), n.id]
+                                    : (config.niches || []).filter(x => x !== n.id);
+                                  setConfig({ ...config, niches });
+                                }}
+                                className="rounded bg-cyber-bg border-gray-700 text-cyan-400 focus:ring-0"
+                              />
+                              {n.label}
+                            </label>
+                          ))}
+                        </div>
+                      </CollapsibleSection>
+
+                      <CollapsibleSection title="Lifestyle & Hospitality">
+                        <div className="grid grid-cols-2 gap-2">
+                          {([
+                             { id: 'hotels', label: 'Hotels' },
+                             { id: 'restaurants', label: 'Restaurants' },
+                             { id: 'spas', label: 'Beauty & Spas' },
+                             { id: 'travel', label: 'Travel/Tourism' }
+                          ]).map((n) => (
+                            <label key={n.id} className="flex items-center gap-2 text-xs text-gray-400 cursor-pointer hover:text-gray-200 transition-colors">
+                               <input
+                                type="checkbox"
+                                checked={config.niches?.includes(n.id)}
+                                onChange={(e) => {
+                                  const niches = e.target.checked 
+                                    ? [...(config.niches || []), n.id]
+                                    : (config.niches || []).filter(x => x !== n.id);
+                                  setConfig({ ...config, niches });
+                                }}
+                                className="rounded bg-cyber-bg border-gray-700 text-cyan-400 focus:ring-0"
+                              />
+                              {n.label}
+                            </label>
+                          ))}
+                        </div>
+                      </CollapsibleSection>
+                    </div>
+                  </div>
+
+                  {/* Roles Section */}
+                  <div>
+                    <h4 className="text-[11px] text-green-400 font-bold uppercase tracking-wider mb-3 flex items-center gap-2">
+                       <span className="w-1.5 h-1.5 rounded-full bg-green-400 shadow-[0_0_8px_green]"></span>
+                       Targeted Roles (Lists)
+                    </h4>
+                    
+                    <div className="max-h-[500px] overflow-y-auto no-scrollbar space-y-1 pr-1">
+                      {/* Leadership */}
+                      <CollapsibleSection title="Leadership & C-Suite">
+                        <div className="grid grid-cols-2 gap-2">
+                          {([
+                             { id: 'ceo', label: 'CEO/Founders' },
+                             { id: 'directors', label: 'Directors' },
+                             { id: 'managers', label: 'Managers' }
+                          ]).map((r) => (
+                            <label key={r.id} className="flex items-center gap-2 text-xs text-gray-400 cursor-pointer hover:text-gray-200 transition-colors">
+                              <input
+                                type="checkbox"
+                                checked={config.roles?.includes(r.id)}
+                                onChange={(e) => {
+                                  const roles = e.target.checked 
+                                    ? [...(config.roles || []), r.id]
+                                    : (config.roles || []).filter(x => x !== r.id);
+                                  setConfig({ ...config, roles });
+                                }}
+                                className="rounded bg-cyber-bg border-gray-700 text-green-400 focus:ring-0"
+                              />
+                              {r.label}
+                            </label>
+                          ))}
+                        </div>
+                      </CollapsibleSection>
+
+                      <CollapsibleSection title="Corporate & Operations">
+                        <div className="grid grid-cols-2 gap-2">
+                          {([
+                             { id: 'hr_managers', label: 'HR Managers' },
+                             { id: 'marketing_execs', label: 'Marketing Execs' },
+                             { id: 'sales_reps', label: 'Sales Reps' },
+                             { id: 'support_staff', label: 'Customer Support' },
+                             { id: 'accountants', label: 'Accountants' },
+                             { id: 'brokers', label: 'Brokers' }
+                          ]).map((r) => (
+                            <label key={r.id} className="flex items-center gap-2 text-xs text-gray-400 cursor-pointer hover:text-gray-200 transition-colors">
+                               <input
+                                type="checkbox"
+                                checked={config.roles?.includes(r.id)}
+                                onChange={(e) => {
+                                  const roles = e.target.checked 
+                                    ? [...(config.roles || []), r.id]
+                                    : (config.roles || []).filter(x => x !== r.id);
+                                  setConfig({ ...config, roles });
+                                }}
+                                className="rounded bg-cyber-bg border-gray-700 text-green-400 focus:ring-0"
+                              />
+                              {r.label}
+                            </label>
+                          ))}
+                        </div>
+                      </CollapsibleSection>
+
+                      <CollapsibleSection title="Tech & Global Experts">
+                        <div className="grid grid-cols-2 gap-2">
+                          {([
+                             { id: 'engineers', label: 'Engineers' },
+                             { id: 'developers', label: 'Developers' },
+                             { id: 'designers', label: 'Designers' },
+                             { id: 'lawyers', label: 'Lawyers' },
+                             { id: 'researchers', label: 'Researchers' }
+                          ]).map((r) => (
+                            <label key={r.id} className="flex items-center gap-2 text-xs text-gray-400 cursor-pointer hover:text-gray-200 transition-colors">
+                               <input
+                                type="checkbox"
+                                checked={config.roles?.includes(r.id)}
+                                onChange={(e) => {
+                                  const roles = e.target.checked 
+                                    ? [...(config.roles || []), r.id]
+                                    : (config.roles || []).filter(x => x !== r.id);
+                                  setConfig({ ...config, roles });
+                                }}
+                                className="rounded bg-cyber-bg border-gray-700 text-green-400 focus:ring-0"
+                              />
+                              {r.label}
+                            </label>
+                          ))}
+                        </div>
+                      </CollapsibleSection>
+
+                      <CollapsibleSection title="Medical & Services">
+                        <div className="grid grid-cols-2 gap-2">
+                          {([
+                             { id: 'doctors', label: 'Doctors' },
+                             { id: 'nurses', label: 'Nurses' },
+                             { id: 'teachers', label: 'Teachers' },
+                             { id: 'technicians', label: 'Technicians' },
+                             { id: 'workers', label: 'Staff/Workers' },
+                             { id: 'security', label: 'Security' }
+                          ]).map((r) => (
+                            <label key={r.id} className="flex items-center gap-2 text-xs text-gray-400 cursor-pointer hover:text-gray-200 transition-colors">
+                               <input
+                                type="checkbox"
+                                checked={config.roles?.includes(r.id)}
+                                onChange={(e) => {
+                                  const roles = e.target.checked 
+                                    ? [...(config.roles || []), r.id]
+                                    : (config.roles || []).filter(x => x !== r.id);
+                                  setConfig({ ...config, roles });
+                                }}
+                                className="rounded bg-cyber-bg border-gray-700 text-green-400 focus:ring-0"
+                              />
+                              {r.label}
+                            </label>
+                          ))}
+                        </div>
+                      </CollapsibleSection>
+
+                      <CollapsibleSection title="Public & Candidates">
+                        <div className="grid grid-cols-2 gap-2">
+                          {([
+                             { id: 'students', label: 'Students' },
+                             { id: 'jobseekers', label: 'Job Seekers' },
+                             { id: 'freelancers', label: 'Freelancers' },
+                             { id: 'interns', label: 'Interns' },
+                             { id: 'visitors', label: 'Visitors' },
+                             { id: 'patients', label: 'Patients' }
+                          ]).map((r) => (
+                            <label key={r.id} className="flex items-center gap-2 text-xs text-gray-400 cursor-pointer hover:text-gray-200 transition-colors">
+                               <input
+                                type="checkbox"
+                                checked={config.roles?.includes(r.id)}
+                                onChange={(e) => {
+                                  const roles = e.target.checked 
+                                    ? [...(config.roles || []), r.id]
+                                    : (config.roles || []).filter(x => x !== r.id);
+                                  setConfig({ ...config, roles });
+                                }}
+                                className="rounded bg-cyber-bg border-gray-700 text-green-400 focus:ring-0"
+                              />
+                              {r.label}
+                            </label>
+                          ))}
+                        </div>
+                      </CollapsibleSection>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
 
             {/* Action Buttons */}
@@ -290,7 +902,6 @@ export const Extract: React.FC = () => {
                 </div>
                 {isRunning ? '🛑 STOP EXTRACTION NOW' : 'Stop Engine'}
               </GlowButton>
-            </div>
           </div>
         </div>
 

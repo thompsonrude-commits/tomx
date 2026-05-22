@@ -12,11 +12,14 @@ export const Dashboard: React.FC = () => {
     domainsDiscovered: 0,
     pagesCrawled: 0,
     activeJobs: 0,
+    isMailerRunning: false,
   });
   const [logs, setLogs] = useState<LogRecord[]>([]);
   const [events, setEvents] = useState<ExtractionEvent[]>([]);
   const [emails, setEmails] = useState<EmailRecord[]>([]);
   const [chartData, setChartData] = useState<{ time: string; emails: number }[]>([]);
+  const [isPurging, setIsPurging] = useState(false);
+
 
   const loadData = useCallback(async () => {
     try {
@@ -34,6 +37,24 @@ export const Dashboard: React.FC = () => {
       console.error('Failed to load data:', err);
     }
   }, []);
+
+  const handlePurge = async () => {
+    if (!window.electronAPI || isPurging) return;
+    if (!confirm('This will permanently delete all extractions that look like false positives (nonsense words containing @). Proceed?')) return;
+    
+    setIsPurging(true);
+    try {
+      const result = await window.electronAPI.purgeJunkEmails();
+      alert(`Cleanup complete! Removed ${result.removed} junk records. ${result.remaining} valid emails remaining.`);
+      loadData();
+    } catch (err) {
+      console.error('Purge failed:', err);
+      alert('Failed to clean database.');
+    } finally {
+      setIsPurging(false);
+    }
+  };
+
 
   useEffect(() => {
     loadData();
@@ -68,10 +89,25 @@ export const Dashboard: React.FC = () => {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* Page Title */}
-      <div>
-        <h1 className="text-2xl font-bold text-cyber-text">Dashboard</h1>
-        <p className="text-sm text-gray-500 mt-1">Real-time extraction monitoring & analytics</p>
+      <div className="flex justify-between items-center">
+        <div>
+          <h1 className="text-2xl font-bold text-cyber-text">Dashboard</h1>
+          <p className="text-sm text-gray-500 mt-1">Real-time extraction monitoring & analytics</p>
+        </div>
+        <button
+          onClick={handlePurge}
+          disabled={isPurging}
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium transition-all
+            ${isPurging 
+              ? 'bg-gray-800 border-gray-700 text-gray-500 cursor-not-allowed' 
+              : 'bg-cyber-card border-cyber-cyan/30 text-cyber-cyan hover:bg-cyber-cyan/10 hover:border-cyber-cyan/50 shadow-[0_0_10px_rgba(0,240,255,0.1)]'
+            }`}
+        >
+          <svg className={`w-4 h-4 ${isPurging ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+          </svg>
+          {isPurging ? 'Cleaning...' : 'Clean Junk'}
+        </button>
       </div>
 
       {/* Stats Cards */}

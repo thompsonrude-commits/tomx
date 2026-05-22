@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { GlowButton } from '../components/GlowButton';
 import { ProxyTestResult } from '../types';
-import { Shield, Trash2, CheckCircle2, AlertCircle, Clock, Upload, List } from 'lucide-react';
+import { Shield, Trash2, CheckCircle2, AlertCircle, Clock, Upload, List, Zap } from 'lucide-react';
 
 interface DBProxy {
   id: number;
@@ -17,9 +17,42 @@ export const ProxyManager: React.FC = () => {
   const [testing, setTesting] = useState(false);
   const [fetching, setFetching] = useState(false);
   const [view, setView] = useState<'list' | 'import'>('list');
+  const [autopilotStatus, setAutopilotStatus] = useState<string>('Autopilot: Initializing proxy verification...');
+  const [autopilotDone, setAutopilotDone] = useState(false);
+  const pollRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     loadProxies();
+
+    // Poll every 3 seconds while autopilot is running to reflect live changes
+    pollRef.current = setInterval(async () => {
+      if (window.electronAPI) {
+        const p = await window.electronAPI.getProxies();
+        setProxies(p);
+      }
+    }, 3000);
+
+    // Listen for autopilot complete event from main process
+    if (window.electronAPI?.onProxyAutopilotDone) {
+      window.electronAPI.onProxyAutopilotDone((working: number) => {
+        setAutopilotStatus(`Autopilot complete — ${working} working proxies ready`);
+        setAutopilotDone(true);
+        if (pollRef.current) clearInterval(pollRef.current);
+        loadProxies();
+      });
+    } else {
+      // Fallback: stop polling after 60s if no event support
+      setTimeout(() => {
+        setAutopilotDone(true);
+        setAutopilotStatus('Autopilot: Background verification running...');
+        if (pollRef.current) clearInterval(pollRef.current);
+        loadProxies();
+      }, 60000);
+    }
+
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
   }, []);
 
   const loadProxies = async () => {
@@ -80,6 +113,8 @@ export const ProxyManager: React.FC = () => {
     for (const p of proxies) {
       await testProxy(p.address);
     }
+    // Reload — failed proxies are auto-deleted, only working ones remain
+    await loadProxies();
     setTesting(false);
   };
 
@@ -104,6 +139,19 @@ export const ProxyManager: React.FC = () => {
              <List size={14} className="mr-1" /> Proxy List
            </GlowButton>
         </div>
+      </div>
+
+      {/* Autopilot Status Banner */}
+      <div className={`flex items-center gap-3 px-4 py-3 rounded-xl border text-sm font-medium transition-all ${
+        autopilotDone
+          ? 'bg-green-500/10 border-green-500/30 text-green-400'
+          : 'bg-blue-500/10 border-blue-500/30 text-blue-400'
+      }`}>
+        <Zap size={16} className={autopilotDone ? '' : 'animate-pulse'} />
+        <span>{autopilotStatus}</span>
+        {!autopilotDone && (
+          <span className="ml-auto text-[10px] text-blue-300 font-mono animate-pulse">RUNNING</span>
+        )}
       </div>
 
       {/* Health Monitor */}

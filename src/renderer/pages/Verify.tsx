@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import { GlowButton } from '../components/GlowButton';
 import { EmailRecord, VerificationResult } from '../types';
 
@@ -104,11 +104,11 @@ export const Verify: React.FC = () => {
   };
 
   const handleExport = async () => {
-    const filterStatus = statusFilter === 'All' ? undefined : statusFilter;
+    const targetStatus = statusFilter === 'All' ? undefined : statusFilter === 'Active' ? 'Active' : statusFilter === 'Rejected' ? 'Rejected' : undefined;
     try {
       if (window.electronAPI) {
         const result = await window.electronAPI.exportData('csv', {
-          filterStatus: filterStatus as any,
+          filterStatus: targetStatus as any,
           columns: ['email', 'name', 'phone', 'domain', 'sourcePage', 'status', 'foundAt'],
           format: 'csv'
         });
@@ -122,10 +122,10 @@ export const Verify: React.FC = () => {
   };
 
   const handleDiscardInactive = async () => {
-    if (!confirm('Are you sure you want to PERMANENTLY delete all Inactive emails from the database?')) return;
+    if (!confirm('Are you sure you want to PERMANENTLY delete all Rejected and Invalid emails from the database?')) return;
     try {
       if (window.electronAPI) {
-        await window.electronAPI.deleteEmailsByStatus('Inactive');
+        await window.electronAPI.deleteEmailsByStatus('Rejected');
         alert('Inactive emails discarded successfully.');
         setPage(1);
         loadEmails();
@@ -197,7 +197,7 @@ export const Verify: React.FC = () => {
             Import Emails
           </GlowButton>
           <GlowButton onClick={handleExport} variant="success" disabled={verifying}>
-            {statusFilter === 'All' ? 'Export All' : `Export ${statusFilter}`}
+            Export Active
           </GlowButton>
         </div>
 
@@ -208,11 +208,10 @@ export const Verify: React.FC = () => {
                 onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
                 className="bg-cyber-bg border border-gray-700 rounded-lg pl-3 pr-8 py-2 text-sm text-cyber-text focus:border-cyber-accent/50 focus:outline-none appearance-none"
               >
-                <option value="All">All</option>
-                <option value="Active">Active</option>
-                <option value="Inactive">Inactive</option>
-                <option value="Unknown">Unknown</option>
-                <option value="pending">Pending</option>
+                <option value="All">All Status</option>
+                <option value="Active">Active Only</option>
+                <option value="Rejected">Inactive/Rejected</option>
+                <option value="Pending">Pending</option>
               </select>
               <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-gray-500">
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path d="M19 9l-7 7-7-7" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
@@ -290,20 +289,15 @@ export const Verify: React.FC = () => {
                       <td className="px-4 py-3 text-gray-400">{email.domain}</td>
                       <td className="px-4 py-3">
                         {result ? (
-                          <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
-                            result.status === 'Active' ? 'bg-green-500/10 text-green-400' :
-                            result.status === 'Inactive' ? 'bg-red-500/10 text-red-400' :
-                            result.status === 'Unknown' ? 'bg-yellow-500/10 text-yellow-400' :
-                            'bg-gray-500/10 text-gray-400'
-                          }`}>
-                            {result.status}
+                          <span className={`px-2 py-0.5 rounded-full text-xs ${result.valid ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'}`}>
+                            {result.status || (result.valid ? 'Active' : 'Rejected')}
                           </span>
                         ) : (
                           <span className="px-2 py-0.5 rounded-full text-xs bg-gray-500/10 text-gray-400">Pending</span>
                         )}
                       </td>
                       <td className="px-4 py-3 text-xs text-gray-500 font-mono text-right">
-                        {result?.mxRecords?.join(', ') || '—'}
+                        {result?.mxRecords?.join(', ') || 'ΓÇö'}
                       </td>
                     </tr>
                   );

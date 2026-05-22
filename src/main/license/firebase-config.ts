@@ -1,4 +1,4 @@
-// src/main/license/firebase-config.ts
+﻿// src/main/license/firebase-config.ts
 
 // REPLACE THESE VALUES with your Firebase SDK snippet from the Firebase Console!
 export const firebaseConfig = {

@@ -1,9 +1,5 @@
-// Replace these with your Supabase project URL and anon/service key
-// Get them from: https://supabase.com/dashboard → Project Settings → API
 export const supabaseConfig = {
   url: 'https://fwrocwfavosbqwjykkxq.supabase.co',
-  // Use the anon key in the main app (read/update only via RLS)
   anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ3cm9jd2Zhdm9zYnF3anlra3hxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5ODA0OTIsImV4cCI6MjA5MDU1NjQ5Mn0.oMQOkkHK8d2zbcF-p57xh6cBcUpV3F9MJw3v1pDPAN0',
-  // Use the service_role key in the admin app (full access)
   serviceKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ3cm9jd2Zhdm9zYnF3anlra3hxIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NDk4MDQ5MiwiZXhwIjoyMDkwNTU2NDkyfQ.t4n4rmNnftHFRDITBpurH6SMfKPJ-u6-LqyZ7yQ8U-E',
 };

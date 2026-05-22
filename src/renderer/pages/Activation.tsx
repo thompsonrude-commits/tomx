@@ -52,7 +52,7 @@ export const Activation: React.FC<ActivationProps> = ({ onActivated }) => {
               <path d="M2 12l10 5 10-5" />
             </svg>
             <h1 className="text-2xl font-bold text-cyber-accent glow-text">TomXtractor 49ja</h1>
-            <p className="text-sm text-gray-500 mt-1">v1.0</p>
+            <p className="text-sm text-gray-500 mt-1">v1.0.6</p>
           </div>
 
           {/* Trial info message */}

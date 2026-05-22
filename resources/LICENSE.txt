@@ -1,0 +1,26 @@
+END USER LICENSE AGREEMENT (EULA)
+
+This End User License Agreement ("Agreement") is a legal agreement between you and TomXtractor ("Company") for the TomXtractor 49ja software application ("Software").
+
+1. LICENSE GRANT
+Company grants you a personal, non-transferable, non-exclusive license to use the Software on your devices in accordance with the terms of this Agreement.
+
+2. RESTRICTIONS
+You shall not:
+- Edit, alter, modify, adapt, translate or otherwise change the whole or any part of the Software.
+- Decompile, disassemble or reverse engineer the Software.
+- Reproduce, copy, distribute, resell or otherwise use the Software for any commercial purpose.
+- Use the Software in any way which breaches any applicable local, national or international law.
+
+3. INTELLECTUAL PROPERTY AND OWNERSHIP
+Company shall at all times retain ownership of the Software as originally downloaded by you and all subsequent downloads of the Software by you. The Software (and the copyright, and other intellectual property rights of whatever nature in the Software, including any modifications made thereto) are and shall remain the property of Company.
+
+4. TERMINATION
+This Agreement is effective from the date you first use the Software and shall continue until terminated. You may terminate it at any time upon written notice to Company. It will also terminate immediately if you fail to comply with any term of this Agreement.
+
+5. SUPPORT
+For support or licensing inquiries, please contact:
+Email: mckpedersen@gmail.com
+
+6. GOVERNING LAW
+This Agreement, and any dispute arising out of or in connection with this Agreement, shall be governed by and construed in accordance with the laws of the Jurisdiction of the Company's Operation.

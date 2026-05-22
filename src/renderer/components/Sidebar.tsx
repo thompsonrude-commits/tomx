@@ -219,6 +219,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentPage, onNavigate }) => 
           <div className={`w-2 h-2 rounded-full ${mailerActive ? 'bg-cyber-accent animate-pulse shadow-glow-cyan' : 'bg-gray-600'}`} />
           {!collapsed && <span className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">{mailerActive ? 'Mailer Sending' : 'Mailer Ready'}</span>}
         </div>
+
+        {/* Version Indicator */}
+        {!collapsed && (
+          <div className="text-[10px] text-gray-500 font-mono pt-2 border-t border-white/5 opacity-50 text-center">
+            v1.0.12 Build
+          </div>
+        )}
       </div>
     </aside>
   );

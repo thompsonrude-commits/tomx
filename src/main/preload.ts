@@ -36,6 +36,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getWorkingProxies: () => ipcRenderer.invoke('get-working-proxies'),
   fetchFreeProxies: () => ipcRenderer.invoke('fetch-free-proxies'),
   testProxy: (proxy: string) => ipcRenderer.invoke('proxy-test', proxy),
+  onProxyAutopilotDone: (callback: (working: number) => void) => {
+    ipcRenderer.on('proxy-autopilot-done', (_event, working) => callback(working));
+    return () => ipcRenderer.removeAllListeners('proxy-autopilot-done');
+  },
 
   // License
   checkLicense: () => ipcRenderer.invoke('check-license'),
@@ -46,6 +50,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   addManualEmails: (data: { emails: string[], sourcePage: string, domain: string }) => ipcRenderer.invoke('add-manual-emails', data),
 
   // Database
+  purgeJunkEmails: () => ipcRenderer.invoke('purge-junk-emails'),
   clearEmails: () => ipcRenderer.invoke('clear-emails'),
   clearLogs: () => ipcRenderer.invoke('clear-logs'),
   resetDatabase: () => ipcRenderer.invoke('reset-database'),
@@ -69,6 +74,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   importEmailsFromFile: () => ipcRenderer.invoke('import-emails-from-file'),
   startMailing: (config: any) => ipcRenderer.invoke('start-mailing', config),
   stopMailing: () => ipcRenderer.invoke('stop-mailing'),
+  exportCampaignReport: (reportPath: string) => ipcRenderer.invoke('export-campaign-report', reportPath),
   onMailingEvent: (callback: (event: any, data: any) => void) => {
     ipcRenderer.on('mailing-event', callback);
     return () => ipcRenderer.removeListener('mailing-event', callback);

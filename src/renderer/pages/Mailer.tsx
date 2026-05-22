@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { GlowButton } from '../components/GlowButton';
-import { Mail, Loader2, Play, Square, Plus, Trash2, CheckCircle2, AlertCircle, Clock, AlertTriangle } from 'lucide-react';
+import { Mail, Loader2, Play, Square, Plus, Trash2, CheckCircle2, AlertCircle, Clock, AlertTriangle, Paperclip } from 'lucide-react';
+import { RichTextEditor } from '../components/RichTextEditor';
 
 interface SmtpAccount {
   id?: number;
@@ -19,8 +20,10 @@ interface MailingLog {
   recipient: string;
   subject: string;
   status: string;
+  deliveryLocation: string;
+  statusDetails?: string;
   error?: string;
-  sent_at: string;
+  sentAt: string;
 }
 
 export const Mailer: React.FC = () => {
@@ -41,6 +44,46 @@ export const Mailer: React.FC = () => {
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
   const [recipients, setRecipients] = useState('');
+  const [autoRephrase, setAutoRephrase] = useState(false);
+  const [attachments, setAttachments] = useState<{filename: string, path: string}[]>([]);
+  const [spamRisk, setSpamRisk] = useState<{ score: number; triggers: string[] }>({ score: 0, triggers: [] });
+  const [campaignReport, setCampaignReport] = useState<{ sent: number; failed: number; skipped: number; total: number; reportPath: string } | null>(null);
+
+  const [autoSyncVerified, setAutoSyncVerified] = useState(false);
+
+  const SPAM_TRIGGER_WORDS = [
+    'free', 'win', 'winner', 'cash', 'money', 'urgent', 'act now', 'guarantee',
+    '100%', 'no cost', 'no obligation', 'offer', 'congratulations', 'claims',
+    'refinance', 'insurance', 'debt', 'investment', 'rich', 'wealth',
+    'bitcoin', 'crypto', 'lottery', 'inheritance', 'bank account', 'beneficiary',
+    'exclusive', 'limited time', 'lowest price', 'apply now', 'instant'
+  ];
+
+  const calculateSpamRisk = (sub: string, msg: string) => {
+    const fullText = (sub + ' ' + msg).toLowerCase();
+    const triggers: string[] = [];
+    let score = 0;
+
+    for (const word of SPAM_TRIGGER_WORDS) {
+      if (fullText.includes(word)) {
+        score += 10;
+        triggers.push(word);
+      }
+    }
+    if ((fullText.match(/[A-Z]/g) || []).length > fullText.length * 0.3 && fullText.length > 20) {
+        score += 25;
+        triggers.push('Excessive Caps');
+    }
+    if (/!!!/.test(fullText)) {
+        score += 15;
+        triggers.push('Multiple !!!');
+    }
+    setSpamRisk({ score: Math.min(score, 100), triggers: [...new Set(triggers)] });
+  };
+
+  useEffect(() => {
+    calculateSpamRisk(subject, body);
+  }, [subject, body]);
 
   // Initial Data Fetching
   useEffect(() => {
@@ -57,13 +100,19 @@ export const Mailer: React.FC = () => {
               if (settings.subject) setSubject(settings.subject);
               if (settings.body) setBody(settings.body);
               if (settings.recipients) setRecipients(settings.recipients);
+              if (settings.autoRephrase) setAutoRephrase(settings.autoRephrase === 'true');
             }
           }).catch(err => console.error('Mailing settings error:', err));
 
           cleanupFunc = window.electronAPI.onMailingEvent((_event, data: any) => {
             if (!data) return;
             if (data.type === 'started') { setIsRunning(true); setStatus('Sending...'); }
-            else if (data.type === 'complete') { setIsRunning(false); setStatus('Complete'); loadData(); }
+            else if (data.type === 'complete') { 
+              setIsRunning(false); 
+              setStatus('Complete'); 
+              loadData(); 
+              if (data.report) setCampaignReport(data.report);
+            }
             else if (data.type === 'stopped') { setIsRunning(false); setStatus('Stopped'); }
             else if (data.type === 'sent') { setStatus(`Sent to ${data.recipient}`); loadData(); }
             else if (data.type === 'waiting') { setStatus('Waiting (1 min)...'); }
@@ -148,22 +197,40 @@ export const Mailer: React.FC = () => {
       alert('Please add at least one SMTP account');
       return;
     }
-    if (!subject || !body || !recipients) {
-      alert('Please fill in subject, body, and recipients');
+    if (!subject || !body) {
+      alert('Please fill in subject and body');
       return;
     }
     
-    const recipientList = recipients.split(/[\n,]/).map(r => r.trim()).filter(r => r.includes('@'));
-    if (recipientList.length === 0) {
-      alert('No valid recipients found');
-      return;
+    let recipientList: string[] = [];
+
+    if (autoSyncVerified && window.electronAPI) {
+      try {
+        const verifiedRecords = await window.electronAPI.getEmails({ status: 'Active' });
+        recipientList = verifiedRecords.map((r: any) => r.email).filter((e: string) => e?.includes('@'));
+        if (recipientList.length === 0) {
+          alert('No Active/Verified emails found in the database. Please verify some emails first.');
+          return;
+        }
+      } catch (err: any) {
+        alert('Failed to fetch verified emails: ' + err.message);
+        return;
+      }
+    } else {
+      recipientList = recipients.split(/[\n,]/).map(r => r.trim()).filter(r => r.includes('@'));
+      if (recipientList.length === 0) {
+        alert('No valid recipients found in the text box.');
+        return;
+      }
     }
 
     if (window.electronAPI) {
       await window.electronAPI.startMailing({
         subject,
         body,
-        recipients: recipientList
+        recipients: recipientList,
+        autoRephrase,
+        attachments
       });
     }
   };
@@ -207,6 +274,18 @@ export const Mailer: React.FC = () => {
     if (window.electronAPI) {
       window.electronAPI.saveMailingSetting({ key: 'recipients', value: val }).catch(() => {});
     }
+  };
+
+  const handleAttachment = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      const files = Array.from(e.target.files).map(f => ({
+        filename: f.name,
+        path: (f as any).path
+      }));
+      setAttachments(prev => [...prev, ...files]);
+    }
+    // Reset value so same file can be selected again if deleted
+    e.target.value = '';
   };
 
   return (
@@ -356,15 +435,37 @@ export const Mailer: React.FC = () => {
         <div className="lg:col-span-2 space-y-6">
           <div className="bg-cyber-card rounded-xl border border-gray-700/50 p-6 space-y-5">
              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <label className="text-xs font-bold text-gray-500 uppercase px-1">Recipients (Email per line or comma)</label>
-                  <textarea
-                    rows={4}
-                    value={recipients}
-                    onChange={e => handleRecipientsChange(e.target.value)}
-                    placeholder="example@mail.com&#10;test@demo.org"
-                    className="w-full bg-cyber-bg border border-gray-700 rounded-lg px-4 py-3 text-sm text-cyber-text focus:border-cyber-accent/50 focus:outline-none custom-scrollbar"
-                  />
+                <div className="space-y-2 relative">
+                  <div className="flex justify-between items-center px-1">
+                    <label className="text-xs font-bold text-gray-500 uppercase">Recipients</label>
+                    <div className="flex items-center gap-1.5 cursor-pointer" onClick={() => setAutoSyncVerified(!autoSyncVerified)}>
+                      <span className={`text-[10px] uppercase font-bold tracking-tight ${autoSyncVerified ? 'text-cyber-accent' : 'text-gray-500'}`}>
+                        Auto-Sync Verified
+                      </span>
+                      <div className={`w-6 h-3 rounded-full relative transition-colors ${autoSyncVerified ? 'bg-cyber-accent' : 'bg-gray-700'}`}>
+                        <div className={`absolute top-0.5 w-2 h-2 rounded-full bg-white transition-all ${autoSyncVerified ? 'right-0.5' : 'left-0.5'}`}></div>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="relative">
+                    {autoSyncVerified && (
+                       <div className="absolute inset-0 bg-cyber-bg/80 backdrop-blur-[1px] flex flex-col items-center justify-center rounded-lg border border-cyber-accent/30 z-10">
+                          <CheckCircle2 size={24} className="text-cyber-accent mb-1" />
+                          <span className="text-xs font-bold text-cyber-accent uppercase tracking-wider text-center px-2">
+                             Auto-Sync Active<br/>
+                             <span className="text-[9px] text-gray-400">Pulls directly from Verified list on start</span>
+                          </span>
+                       </div>
+                    )}
+                    <textarea
+                      rows={4}
+                      value={recipients}
+                      onChange={e => handleRecipientsChange(e.target.value)}
+                      placeholder="example@mail.com&#10;test@demo.org"
+                      disabled={autoSyncVerified}
+                      className="w-full bg-cyber-bg border border-gray-700 rounded-lg px-4 py-3 text-sm text-cyber-text focus:border-cyber-accent/50 focus:outline-none custom-scrollbar"
+                    />
+                  </div>
                 </div>
                 <div className="space-y-2">
                   <label className="text-xs font-bold text-gray-500 uppercase px-1">Subject</label>
@@ -379,12 +480,55 @@ export const Mailer: React.FC = () => {
                     placeholder="Enter email subject..."
                     className="w-full bg-cyber-bg border border-gray-700 rounded-lg px-4 py-3 text-sm text-cyber-text focus:border-cyber-accent/50 focus:outline-none"
                   />
+                  
+                  <div className="flex items-center gap-2 px-1 pt-2">
+                     <input 
+                        type="checkbox" 
+                        id="autoRephrase"
+                        checked={autoRephrase}
+                        onChange={(e) => {
+                          const val = e.target.checked;
+                          setAutoRephrase(val);
+                          window.electronAPI?.saveMailingSetting({ key: 'autoRephrase', value: val.toString() });
+                        }}
+                        className="rounded bg-cyber-bg border-gray-700 text-cyber-accent focus:ring-0"
+                     />
+                     <label htmlFor="autoRephrase" className="text-xs font-bold text-cyber-accent cursor-pointer uppercase tracking-tight">
+                        Enable "Subtle" Auto-Rephrase (Smart Evasion)
+                     </label>
+                  </div>
+
                   <div className="p-3 bg-cyber-accent/5 border border-cyber-accent/20 rounded-lg text-[11px] text-gray-400 leading-relaxed mt-2">
                     <Clock size={12} className="inline mr-1 text-cyber-accent" />
                     **Safety Rule**: System sends 1 email per minute across all rotated SMTPs to maximize deliverability and avoid spam filters.
-                    <br/><br/>
-                    <AlertCircle size={12} className="inline mr-1 text-yellow-500" />
-                    **SSL Tip**: Use **Port 465** with **SSL/TLS checked**, OR **Port 587** with **SSL/TLS unchecked**.
+                    <hr className="my-2 border-gray-800" />
+                    <div className="space-y-2">
+                        <div className="flex justify-between items-center">
+                            <span className="text-[10px] font-bold uppercase text-gray-500">Real-time Spam Risk</span>
+                            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                                spamRisk.score > 50 ? 'bg-red-500/20 text-red-400' : 
+                                spamRisk.score > 20 ? 'bg-yellow-500/20 text-yellow-400' : 
+                                'bg-green-500/20 text-green-400'
+                            }`}>
+                                {spamRisk.score > 50 ? 'CRITICAL' : spamRisk.score > 20 ? 'MODERATE' : 'CLEAN'}
+                            </span>
+                        </div>
+                        <div className="w-full bg-gray-800 h-1 rounded-full overflow-hidden">
+                            <div 
+                                className={`h-full transition-all duration-500 ${
+                                    spamRisk.score > 50 ? 'bg-red-500' : 
+                                    spamRisk.score > 20 ? 'bg-yellow-500' : 
+                                    'bg-green-500'
+                                }`}
+                                style={{ width: `${spamRisk.score}%` }}
+                            />
+                        </div>
+                        {spamRisk.triggers.length > 0 && (
+                            <p className="text-[9px] text-gray-500 italic">
+                                Triggers: {spamRisk.triggers.join(', ')}
+                            </p>
+                        )}
+                    </div>
                   </div>
                 </div>
              </div>
@@ -398,19 +542,36 @@ export const Mailer: React.FC = () => {
                         {tag}
                       </span>
                     ))}
+                    <span className="text-[10px] bg-yellow-500/10 border border-yellow-500/30 text-yellow-500 px-1.5 py-0.5 rounded font-mono cursor-help" title="Randomly picks one: {Hi|Hello}">
+                      {`{Spintax|Logic}`}
+                    </span>
                   </div>
                 </div>
-                <textarea
-                  rows={8}
+                <RichTextEditor
                   value={body}
-                  onChange={e => {
-                    const val = e.target.value;
+                  onChange={val => {
                     setBody(val);
                     window.electronAPI?.saveMailingSetting({ key: 'body', value: val });
                   }}
-                  placeholder="Write your professional message here...&#10;Hello, I found your contact at {domain}. My system shows the date is {date}."
-                  className="w-full bg-cyber-bg border border-gray-700 rounded-lg px-4 py-3 text-sm text-cyber-text focus:border-cyber-accent/50 focus:outline-none custom-scrollbar"
+                  placeholder="Hello, I found your contact at {domain}. My system shows the date is {date}."
+                  className="min-h-[300px]"
                 />
+                <div className="flex items-center justify-between bg-black/20 p-2 rounded-lg border border-gray-800 mt-2">
+                   <div className="flex flex-wrap gap-2 items-center">
+                     <label className="cursor-pointer text-xs flex items-center gap-1.5 bg-cyber-bg border border-gray-700 hover:border-cyber-accent/50 text-gray-400 px-3 py-1.5 rounded transition-all">
+                       <Paperclip size={14} /> Add Attachment
+                       <input type="file" multiple className="hidden" onChange={handleAttachment} />
+                     </label>
+                     {attachments.map((att, i) => (
+                       <div key={i} className="flex items-center gap-1 bg-cyber-accent/10 border border-cyber-accent/30 text-cyber-accent px-2 py-1 rounded text-[10px]">
+                         <span className="truncate max-w-[150px]" title={att.filename}>{att.filename}</span>
+                         <button onClick={() => setAttachments(attachments.filter((_, idx) => idx !== i))} className="hover:text-red-400 ml-1">
+                           <Trash2 size={10} />
+                         </button>
+                       </div>
+                     ))}
+                   </div>
+                </div>
              </div>
 
              <div className="flex gap-3">
@@ -424,6 +585,50 @@ export const Mailer: React.FC = () => {
                  </GlowButton>
                )}
              </div>
+
+             {/* Campaign Report */}
+             {campaignReport && !isRunning && (
+               <div className="bg-cyber-accent/5 border border-cyber-accent/20 rounded-xl p-4 space-y-3">
+                 <div className="flex justify-between items-center">
+                   <h4 className="text-xs font-bold text-cyber-accent uppercase tracking-wider">Campaign Report</h4>
+                   <button
+                     onClick={() => setCampaignReport(null)}
+                     className="text-gray-500 hover:text-gray-300 text-xs"
+                   >✕</button>
+                 </div>
+                 <div className="grid grid-cols-4 gap-3 text-center">
+                   <div className="bg-cyber-bg rounded-lg p-2">
+                     <div className="text-lg font-bold text-white">{campaignReport.total}</div>
+                     <div className="text-[10px] text-gray-500 uppercase">Total</div>
+                   </div>
+                   <div className="bg-cyber-bg rounded-lg p-2">
+                     <div className="text-lg font-bold text-green-400">{campaignReport.sent}</div>
+                     <div className="text-[10px] text-gray-500 uppercase">Sent</div>
+                   </div>
+                   <div className="bg-cyber-bg rounded-lg p-2">
+                     <div className="text-lg font-bold text-red-400">{campaignReport.failed}</div>
+                     <div className="text-[10px] text-gray-500 uppercase">Failed</div>
+                   </div>
+                   <div className="bg-cyber-bg rounded-lg p-2">
+                     <div className="text-lg font-bold text-yellow-400">{campaignReport.skipped}</div>
+                     <div className="text-[10px] text-gray-500 uppercase">Skipped</div>
+                   </div>
+                 </div>
+                 {campaignReport.reportPath && (
+                   <button
+                     onClick={async () => {
+                       if (window.electronAPI) {
+                         const saved = await (window.electronAPI as any).exportCampaignReport(campaignReport.reportPath);
+                         if (saved) alert(`Report saved to: ${saved}`);
+                       }
+                     }}
+                     className="w-full flex items-center justify-center gap-2 py-2 bg-cyber-accent/20 border border-cyber-accent/40 text-cyber-accent rounded-lg text-sm font-semibold hover:bg-cyber-accent/30 transition-colors"
+                   >
+                     ⬇ Export Campaign Report (CSV)
+                   </button>
+                 )}
+               </div>
+             )}
           </div>
 
           {/* Mailing Status / Logs */}
@@ -444,30 +649,58 @@ export const Mailer: React.FC = () => {
             <div className="overflow-x-auto">
                <table className="w-full text-left text-sm">
                  <thead className="bg-cyber-panel/50 text-gray-500 text-xs">
-                   <tr>
-                     <th className="px-4 py-2 font-medium">To</th>
-                     <th className="px-4 py-2 font-medium">Status</th>
-                     <th className="px-4 py-2 font-medium">Time</th>
-                     <th className="px-4 py-2 font-medium text-right">Details</th>
-                   </tr>
+                    <tr>
+                      <th className="px-4 py-2 font-medium">To</th>
+                      <th className="px-4 py-2 font-medium">Status</th>
+                      <th className="px-4 py-2 font-medium">Location</th>
+                      <th className="px-4 py-2 font-medium">Time</th>
+                      <th className="px-4 py-2 font-medium text-right">Details</th>
+                    </tr>
                  </thead>
                  <tbody className="divide-y divide-gray-800">
-                   {logs.map(log => (
-                     <tr key={log.id} className="hover:bg-white/5 transition-colors">
-                       <td className="px-4 py-2 text-cyber-text text-xs">{log.recipient}</td>
-                       <td className="px-4 py-2">
-                         {log.status === 'success' ? (
-                           <span className="text-green-400 flex items-center gap-1 text-[10px]"><CheckCircle2 size={12} /> Delivered</span>
-                         ) : (
-                           <span className="text-red-400 flex items-center gap-1 text-[10px]"><AlertCircle size={12} /> Failed</span>
-                         )}
-                       </td>
-                       <td className="px-4 py-2 text-gray-500 text-[10px]">{new Date(log.sent_at).toLocaleTimeString()}</td>
-                       <td className="px-4 py-2 text-right">
-                         {log.error ? <span className="text-[10px] text-red-400/70 truncate inline-block max-w-[150px]">{log.error}</span> : <span className="text-gray-600">---</span>}
-                       </td>
-                     </tr>
-                   ))}
+                    {logs.map(log => (
+                      <tr key={log.id} className="hover:bg-white/5 transition-colors">
+                        <td className="px-4 py-2 text-cyber-text text-xs">{log.recipient}</td>
+                        <td className="px-4 py-2">
+                          {log.status === 'success' ? (
+                            <span className="text-green-400 flex items-center gap-1 text-[10px]"><CheckCircle2 size={12} /> Delivered</span>
+                          ) : log.status === 'skipped' ? (
+                            <span className="text-yellow-400 flex items-center gap-1 text-[10px]"><AlertTriangle size={12} /> Skipped</span>
+                          ) : (
+                            <span className="text-red-400 flex items-center gap-1 text-[10px]"><AlertCircle size={12} /> Failed</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-2">
+                           <div className="flex items-center gap-2">
+                              {log.deliveryLocation === 'Inbox' ? (
+                                <span className="text-green-400 bg-green-400/10 px-1.5 py-0.5 rounded text-[9px] font-bold flex items-center gap-1 border border-green-400/20">
+                                   <Mail size={10} /> INBOX
+                                </span>
+                              ) : log.deliveryLocation === 'Likely Spam' ? (
+                                <span className="text-yellow-500 bg-yellow-500/10 px-1.5 py-0.5 rounded text-[9px] font-bold flex items-center gap-1 border border-yellow-500/20">
+                                   <AlertTriangle size={10} /> SPAM RISK
+                                </span>
+                              ) : log.deliveryLocation === 'Spam/Blocked' || log.deliveryLocation === 'Blocked' ? (
+                                <span className="text-red-500 bg-red-500/10 px-1.5 py-0.5 rounded text-[9px] font-bold flex items-center gap-1 border border-red-500/20">
+                                   <Trash2 size={10} /> BLOCKED
+                                </span>
+                              ) : (
+                                <span className="text-gray-500 text-[9px]">{log.deliveryLocation || '---'}</span>
+                              )}
+                           </div>
+                        </td>
+                        <td className="px-4 py-2 text-gray-500 text-[10px]">{new Date(log.sentAt).toLocaleTimeString()}</td>
+                        <td className="px-4 py-2 text-right">
+                          {log.error || log.statusDetails ? (
+                            <span className="text-[10px] text-red-400/70 truncate inline-block max-w-[150px]" title={log.error || log.statusDetails}>
+                                {log.error || log.statusDetails}
+                            </span>
+                          ) : (
+                            <span className="text-gray-600">---</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
                    {logs.length === 0 && (
                      <tr>
                        <td colSpan={4} className="px-4 py-12 text-center text-gray-600 italic">No campaign activity recorded yet</td>
