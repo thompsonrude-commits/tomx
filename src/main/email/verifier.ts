@@ -2,6 +2,7 @@ import * as dns from 'dns';
 import * as net from 'net';
 import { promisify } from 'util';
 import { isQualityLead, DISPOSABLE_PROVIDERS } from '../utils/emailFilters';
+import { scoreEmailForMarketing } from '../utils/marketingValidator';
 
 const resolver = new dns.promises.Resolver();
 resolver.setServers(['8.8.8.8', '1.1.1.1', '8.8.4.4']);
@@ -26,7 +27,7 @@ async function robustResolveMx(domain: string, retries = 3): Promise<dns.MxRecor
   return [];
 }
 
-export async function verifyEmail(email: string): Promise<{ email: string; valid: boolean; status: string; mxRecords?: string[] }> {
+export async function verifyEmail(email: string): Promise<{ email: string; valid: boolean; status: string; mxRecords?: string[]; marketingScore?: number; isMarketingReady?: boolean; marketingRisk?: string }> {
   try {
     const emailLower = email.toLowerCase().trim();
     const domain = emailLower.split('@')[1];
@@ -61,9 +62,21 @@ export async function verifyEmail(email: string): Promise<{ email: string; valid
     const sortedMx = (records || []).sort((a, b) => a.priority - b.priority).map((r) => r.exchange);
     const targetMx = sortedMx[0] || domain;
 
+    // 4. MARKETING VALIDATION (AI-style free scoring for genuine business emails)
+    const marketingValidation = scoreEmailForMarketing(emailLower, domain);
+    const marketingRisk = marketingValidation.riskLevel;
+
     // Skip port 25 SMTP check entirely — most servers block it from residential IPs
     // Trust MX records as proof the domain accepts email
-    return { email, valid: true, status: 'Active', mxRecords: sortedMx };
+    return {
+      email,
+      valid: true,
+      status: 'Active',
+      mxRecords: sortedMx,
+      marketingScore: marketingValidation.score,
+      isMarketingReady: marketingValidation.isMarketingReady,
+      marketingRisk: marketingRisk
+    };
   } catch (err: any) {
     return { email, valid: false, status: `System Error: ${err.message}` };
   }

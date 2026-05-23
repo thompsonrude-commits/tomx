@@ -75,6 +75,15 @@ function migrateDatabase() {
     forceSave();
   }
 
+  // Add marketing validation columns for AI-powered email scoring
+  const hasMarketingScore = tableInfo.some(col => col.name === 'marketing_score');
+  if (!hasMarketingScore) {
+    run("ALTER TABLE emails ADD COLUMN marketing_score INTEGER DEFAULT 0");
+    run("ALTER TABLE emails ADD COLUMN is_marketing_ready INTEGER DEFAULT 0");
+    run("ALTER TABLE emails ADD COLUMN marketing_risk TEXT DEFAULT 'unknown'");
+    forceSave();
+  }
+
   const mailingLogsInfo = query("PRAGMA table_info(mailing_logs)");
   if (!mailingLogsInfo.some(col => col.name === 'delivery_location')) {
     run("ALTER TABLE mailing_logs ADD COLUMN delivery_location TEXT DEFAULT 'Pending'");
@@ -208,10 +217,11 @@ export function forceSave() {
   performSave();
 }
 
-export function addEmail(email: string, domain: string, sourcePage: string, phone?: string, name?: string): boolean {
+export function addEmail(email: string, domain: string, sourcePage: string, phone?: string, name?: string, marketingScore?: number, isMarketingReady?: boolean, marketingRisk?: string): boolean {
   const existing = query('SELECT id FROM emails WHERE email = ?', [email]);
   if (existing.length === 0) {
-    run('INSERT INTO emails (email, domain, source_page, phone, name) VALUES (?, ?, ?, ?, ?)', [email, domain, sourcePage, phone || null, name || null]);
+    run('INSERT INTO emails (email, domain, source_page, phone, name, marketing_score, is_marketing_ready, marketing_risk) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', 
+      [email, domain, sourcePage, phone || null, name || null, marketingScore || 0, isMarketingReady ? 1 : 0, marketingRisk || 'unknown']);
     const domainRow = query('SELECT id FROM domains WHERE domain = ?', [domain]);
     if (domainRow.length > 0) {
       run('UPDATE domains SET emails_found = emails_found + 1 WHERE domain = ?', [domain]);
@@ -245,7 +255,7 @@ export function addLog(message: string, level: string = 'info') {
 }
 
 export function getEmails(options: { limit?: number, offset?: number, search?: string, status?: string } = {}): any[] {
-  let sql = 'SELECT id, email, domain, source_page as sourcePage, phone, name, status, status_reason as statusReason, found_at as foundAt FROM emails';
+  let sql = 'SELECT id, email, domain, source_page as sourcePage, phone, name, status, status_reason as statusReason, found_at as foundAt, marketing_score as marketingScore, is_marketing_ready as isMarketingReady, marketing_risk as marketingRisk FROM emails';
   const params: any[] = [];
   const conditions: string[] = [];
 

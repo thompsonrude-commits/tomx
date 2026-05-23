@@ -1,6 +1,7 @@
 import puppeteer, { Browser, Page } from 'puppeteer-core';
 import { EventEmitter } from 'events';
 import { addEmail, addDomain, incrementDomainPages, addLog, updateProxyStatus, deleteFailedProxies } from '../db/database';
+import { scoreEmailForMarketing } from '../utils/marketingValidator';
 // @ts-ignore
 import pdf from 'pdf-parse';
 import * as ExcelJS from 'exceljs';
@@ -482,12 +483,15 @@ export class ExtractionEngine extends EventEmitter {
 
       if (email.length > 80) continue;
 
-      const added = addEmail(email, mailDomain, sourceUrl, primaryPhone, foundName);
+      // Score email for marketing quality (AI-powered free validation)
+      const marketingValidation = scoreEmailForMarketing(emailLower, mailDomain);
+      
+      const added = addEmail(email, mailDomain, sourceUrl, primaryPhone, foundName, marketingValidation.score, marketingValidation.isMarketingReady, marketingValidation.riskLevel);
       if (added) {
         this.emit('event', {
           type: 'email-found',
-          message: `Found: ${email}`,
-          data: { id: Date.now(), email, domain: mailDomain, sourcePage: sourceUrl, phone: primaryPhone, name: foundName, status: 'pending', foundAt: new Date().toISOString() },
+          message: `Found: ${email}${marketingValidation.isMarketingReady ? ' ✓ (Marketing Ready)' : ' ⚠ (Risky for Marketing)'}`,
+          data: { id: Date.now(), email, domain: mailDomain, sourcePage: sourceUrl, phone: primaryPhone, name: foundName, status: 'pending', foundAt: new Date().toISOString(), marketingScore: marketingValidation.score, isMarketingReady: marketingValidation.isMarketingReady, marketingRisk: marketingValidation.riskLevel },
           timestamp: new Date().toISOString(),
         });
       }

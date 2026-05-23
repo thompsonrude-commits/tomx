@@ -10,6 +10,7 @@ import { verifyEmail } from '../email/verifier';
 import { emailMailer } from '../email/mailer';
 import { fetchFreeProxies } from '../crawler/proxyFetcher';
 import { checkDomainDeliverability } from '../utils/emailValidator';
+import { scoreEmailForMarketing } from '../utils/marketingValidator';
 
 const engine = new ExtractionEngine();
 
@@ -234,7 +235,9 @@ export function registerIpcHandlers() {
       const isDeliverable = await checkDomainDeliverability(emailDomain);
       if (!isDeliverable) continue;
 
-      if (db.addEmail(email, domain, sourcePage)) {
+      // AI-powered marketing quality validation
+      const marketingValidation = scoreEmailForMarketing(email, emailDomain);
+      if (db.addEmail(email, domain, sourcePage, undefined, undefined, marketingValidation.score, marketingValidation.isMarketingReady, marketingValidation.riskLevel)) {
         foundCount++;
       }
     }
@@ -297,7 +300,9 @@ export function registerIpcHandlers() {
     let addedCount = 0;
     for (const email of emails) {
       const domain = email.split('@')[1] || 'imported';
-      if (db.addEmail(email, domain, 'imported-file')) {
+      // AI-powered marketing quality validation
+      const marketingValidation = scoreEmailForMarketing(email, domain);
+      if (db.addEmail(email, domain, 'imported-file', undefined, undefined, marketingValidation.score, marketingValidation.isMarketingReady, marketingValidation.riskLevel)) {
         addedCount++;
       }
     }
