@@ -205,26 +205,40 @@ export class EmailMailer extends EventEmitter {
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
       const filePath = path.join(dir, `campaign_report_${timestamp}.csv`);
 
-      const sent = this.campaignRecords.filter(r => r.status === 'Sent').length;
-      const failed = this.campaignRecords.filter(r => r.status === 'Failed').length;
-      const skipped = this.campaignRecords.filter(r => r.status === 'Skipped').length;
+      const sentRecords    = this.campaignRecords.filter(r => r.status === 'Sent');
+      const failedRecords  = this.campaignRecords.filter(r => r.status === 'Failed');
+      const skippedRecords = this.campaignRecords.filter(r => r.status === 'Skipped');
+      const total          = this.campaignRecords.length;
 
-      const lines = [
-        `Campaign Report`,
-        `Subject:,"${subject}"`,
-        `Date:,${new Date().toLocaleString()}`,
-        `Total Recipients:,${this.campaignRecords.length}`,
-        `Sent:,${sent}`,
-        `Failed:,${failed}`,
-        `Skipped:,${skipped}`,
-        ``,
-        `Recipient,Status,Delivery Location,Reason,SMTP Used,Time`,
-        ...this.campaignRecords.map(r =>
-          `"${r.recipient}","${r.status}","${r.location}","${r.reason.replace(/"/g, '""')}","${r.smtp}","${r.time}"`
-        )
-      ];
+      // Find the max rows needed across all columns
+      const maxRows = Math.max(sentRecords.length, failedRecords.length, skippedRecords.length, 1);
 
-      fs.writeFileSync(filePath, lines.join('\n'), 'utf-8');
+      const lines: string[] = [];
+
+      // Row 1: Title
+      lines.push(`CAMPAIGN REPORT`);
+
+      // Row 2: Column headers
+      lines.push(`Date,Subject,Total,Sent,Blocked,Skipped`);
+
+      // Row 3: First data row with campaign info + first email in each category
+      lines.push(
+        `"${new Date().toLocaleString()}",` +
+        `"${subject}",` +
+        `${total},` +
+        `"${sentRecords[0]?.recipient || 'None'}",` +
+        `"${failedRecords[0]?.recipient || 'None'}",` +
+        `"${skippedRecords[0]?.recipient || 'None'}"`
+      );
+
+      // Remaining rows — just emails under each column
+      for (let i = 1; i < maxRows; i++) {
+        lines.push(
+          `,,,"${sentRecords[i]?.recipient || ''}","${failedRecords[i]?.recipient || ''}","${skippedRecords[i]?.recipient || ''}"`
+        );
+      }
+
+      fs.writeFileSync(filePath, lines.join('\r\n'), 'utf-8');
       return filePath;
     } catch {
       return '';
@@ -289,21 +303,13 @@ export class EmailMailer extends EventEmitter {
 
   private async sendFailureNotification(smtp: any, failedRecipient: string, reason: string, time: string) {
     const actualFromEmail = smtp.fromEmail || smtp.user;
-    const dns = require('dns') as typeof import('dns');
-    let resolvedHost = smtp.host;
-    try {
-      const addresses = await new Promise<string[]>((resolve, reject) => {
-        dns.resolve4(smtp.host, (err, addrs) => err ? reject(err) : resolve(addrs));
-      });
-      if (addresses && addresses.length > 0) resolvedHost = addresses[0];
-    } catch { /* fallback */ }
 
     const transport = nodemailer.createTransport({
-      host: resolvedHost,
+      host: smtp.host,
       port: smtp.port,
       secure: smtp.secure === 1,
       auth: { user: smtp.user, pass: smtp.pass },
-      tls: { rejectUnauthorized: false, minVersion: 'TLSv1', servername: smtp.host },
+      tls: { rejectUnauthorized: false, minVersion: 'TLSv1' },
       connectionTimeout: 15000,
     });
 
@@ -326,22 +332,12 @@ export class EmailMailer extends EventEmitter {
     const isGmail = smtp.host.toLowerCase().includes('gmail.com') || smtp.user.toLowerCase().endsWith('@gmail.com');
     const isYahoo = smtp.host.toLowerCase().includes('yahoo.com') || smtp.user.toLowerCase().endsWith('@yahoo.com');
 
-    // Resolve to IPv4 to avoid ENETUNREACH
-    let resolvedHost = smtp.host;
-    try {
-      const dns = require('dns') as typeof import('dns');
-      const addresses = await new Promise<string[]>((resolve, reject) => {
-        dns.resolve4(smtp.host, (err, addrs) => err ? reject(err) : resolve(addrs));
-      });
-      if (addresses && addresses.length > 0) resolvedHost = addresses[0];
-    } catch { /* fallback to original host */ }
-
     const transportConfig: any = {
-      host: resolvedHost,
+      host: smtp.host,
       port: smtp.port,
       secure: smtp.secure === 1,
       auth: { user: smtp.user, pass: smtp.pass },
-      tls: { rejectUnauthorized: false, minVersion: 'TLSv1', servername: smtp.host },
+      tls: { rejectUnauthorized: false, minVersion: 'TLSv1' },
       connectionTimeout: 30000,
       greetingTimeout: 30000,
       socketTimeout: 45000,
@@ -388,21 +384,12 @@ export class EmailMailer extends EventEmitter {
     const isGmail = smtp.host.toLowerCase().includes('gmail.com') || smtp.user.toLowerCase().endsWith('@gmail.com');
     const isYahoo = smtp.host.toLowerCase().includes('yahoo.com') || smtp.user.toLowerCase().endsWith('@yahoo.com');
 
-    let resolvedHost = smtp.host;
-    try {
-      const dns = require('dns') as typeof import('dns');
-      const addresses = await new Promise<string[]>((resolve, reject) => {
-        dns.resolve4(smtp.host, (err, addrs) => err ? reject(err) : resolve(addrs));
-      });
-      if (addresses && addresses.length > 0) resolvedHost = addresses[0];
-    } catch { /* fallback */ }
-
     const transportConfig: any = {
-      host: resolvedHost,
+      host: smtp.host,
       port: smtp.port,
       secure: smtp.secure === 1,
       auth: { user: smtp.user, pass: smtp.pass },
-      tls: { rejectUnauthorized: false, minVersion: 'TLSv1', servername: smtp.host },
+      tls: { rejectUnauthorized: false, minVersion: 'TLSv1' },
       connectionTimeout: 30000,
     };
 

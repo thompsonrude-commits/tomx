@@ -44,6 +44,18 @@ export async function verifyEmail(email: string): Promise<{ email: string; valid
         return { email, valid: false, status: 'Disposable Email' };
     }
 
+    // 2b. Typo domain check — catch common misspellings of major providers
+    const TYPO_DOMAINS = new Set([
+      'gmaicom', 'gmai.com', 'gmal.com', 'gmil.com', 'gmaill.com', 'gmaio.com',
+      'gnail.com', 'gmaill.com', 'gamil.com', 'gamail.com', 'gemail.com',
+      'yaho.com', 'yahooo.com', 'yaho.co', 'yaoo.com', 'yhoo.com',
+      'hotmai.com', 'hotmial.com', 'hotmil.com', 'hotmaill.com',
+      'outlok.com', 'outloo.com', 'outlookk.com', 'outloook.com',
+    ]);
+    if (TYPO_DOMAINS.has(domain)) {
+      return { email, valid: false, status: `Typo domain — did you mean ${domain.replace(/gmai[^.]*/, 'gmail').replace(/yaho[^.]*/, 'yahoo').replace(/hotmai[^.]*/, 'hotmail')}?` };
+    }
+
     // 3. DNS / MX Record Check
     const records = await robustResolveMx(domain);
     
@@ -62,20 +74,36 @@ export async function verifyEmail(email: string): Promise<{ email: string; valid
     const sortedMx = (records || []).sort((a, b) => a.priority - b.priority).map((r) => r.exchange);
     const targetMx = sortedMx[0] || domain;
 
-    // 4. MARKETING VALIDATION (AI-style free scoring for genuine business emails)
+    // 4. MARKETING VALIDATION
     const marketingValidation = scoreEmailForMarketing(emailLower, domain);
-    const marketingRisk = marketingValidation.riskLevel;
 
-    // Skip port 25 SMTP check entirely — most servers block it from residential IPs
-    // Trust MX records as proof the domain accepts email
+    // 5. For major providers, trust MX records — they block port 25
+    const trustedProviders = [
+      'gmail.com', 'googlemail.com', 'yahoo.com', 'yahoo.co.uk', 'ymail.com',
+      'outlook.com', 'hotmail.com', 'live.com', 'msn.com', 'icloud.com',
+      'me.com', 'mac.com', 'aol.com', 'protonmail.com', 'proton.me',
+      'zoho.com', 'daum.net', 'naver.com', 'mail.ru', 'yandex.com',
+    ];
+    if (trustedProviders.includes(domain)) {
+      return { email, valid: true, status: 'Active', mxRecords: sortedMx, marketingScore: marketingValidation.score, isMarketingReady: marketingValidation.isMarketingReady, marketingRisk: marketingValidation.riskLevel };
+    }
+
+    // 6. For unknown domains, do SMTP handshake to verify mailbox exists
+    const { active, status } = await checkSmtpRecipient(targetMx, emailLower);
+
+    // If port 25 is blocked/timeout, trust MX records
+    if (status === 'SMTP Timeout' || status === 'Connection Closed' || status === 'SMTP Error' || status === 'Connection Failed' || status === 'Verification Blocked') {
+      return { email, valid: true, status: 'Active (Unverified)', mxRecords: sortedMx, marketingScore: marketingValidation.score, isMarketingReady: marketingValidation.isMarketingReady, marketingRisk: marketingValidation.riskLevel };
+    }
+
     return {
       email,
-      valid: true,
-      status: 'Active',
+      valid: active,
+      status,
       mxRecords: sortedMx,
       marketingScore: marketingValidation.score,
       isMarketingReady: marketingValidation.isMarketingReady,
-      marketingRisk: marketingRisk
+      marketingRisk: marketingValidation.riskLevel
     };
   } catch (err: any) {
     return { email, valid: false, status: `System Error: ${err.message}` };

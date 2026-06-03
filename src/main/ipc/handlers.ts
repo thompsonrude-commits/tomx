@@ -344,4 +344,52 @@ export function registerIpcHandlers() {
     fs.copyFileSync(reportPath, saveResult.filePath);
     return saveResult.filePath;
   });
+
+  // Mail Merge — parse CSV/Excel file and return rows + detected columns
+  ipcMain.handle('parse-mailmerge-file', async () => {
+    const win = BrowserWindow.getAllWindows()[0];
+    const { canceled, filePaths } = await dialog.showOpenDialog(win, {
+      properties: ['openFile'],
+      filters: [{ name: 'Data Files', extensions: ['csv', 'xlsx', 'xls'] }]
+    });
+    if (canceled || filePaths.length === 0) return null;
+
+    const filePath = filePaths[0];
+    let rows: Record<string, string>[] = [];
+
+    try {
+      if (filePath.endsWith('.csv')) {
+        const { parse } = await import('fast-csv');
+        await new Promise<void>((resolve, reject) => {
+          fs.createReadStream(filePath)
+            .pipe(parse({ headers: true, ignoreEmpty: true, trim: true }))
+            .on('data', (row: Record<string, string>) => rows.push(row))
+            .on('error', reject)
+            .on('end', resolve);
+        });
+      } else {
+        const ExcelJS = await import('exceljs');
+        const workbook = new ExcelJS.Workbook();
+        await workbook.xlsx.readFile(filePath);
+        const sheet = workbook.worksheets[0];
+        const headers: string[] = [];
+        sheet.getRow(1).eachCell((cell) => { headers.push(String(cell.value || '').trim()); });
+        sheet.eachRow((row, rowNum) => {
+          if (rowNum === 1) return;
+          const obj: Record<string, string> = {};
+          row.eachCell((cell, colNum) => {
+            const key = headers[colNum - 1];
+            if (key) obj[key] = String(cell.value || '').trim();
+          });
+          if (Object.values(obj).some(v => v)) rows.push(obj);
+        });
+      }
+    } catch (err: any) {
+      return { error: err.message };
+    }
+
+    if (rows.length === 0) return { error: 'No data found in file' };
+    const columns = Object.keys(rows[0]);
+    return { rows, columns };
+  });
 }

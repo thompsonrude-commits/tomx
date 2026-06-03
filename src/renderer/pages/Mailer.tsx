@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { GlowButton } from '../components/GlowButton';
-import { Mail, Loader2, Play, Square, Plus, Trash2, CheckCircle2, AlertCircle, Clock, AlertTriangle, Paperclip } from 'lucide-react';
+import { MailMerge } from '../components/MailMerge';
+import { Mail, Loader2, Play, Square, Plus, Trash2, CheckCircle2, AlertCircle, Clock, AlertTriangle, Paperclip, GitMerge, X } from 'lucide-react';
 import { RichTextEditor } from '../components/RichTextEditor';
 
 interface SmtpAccount {
@@ -50,6 +51,8 @@ export const Mailer: React.FC = () => {
   const [campaignReport, setCampaignReport] = useState<{ sent: number; failed: number; skipped: number; total: number; reportPath: string } | null>(null);
 
   const [autoSyncVerified, setAutoSyncVerified] = useState(false);
+  const [showMailMerge, setShowMailMerge] = useState(false);
+  const [mailMergeRecipients, setMailMergeRecipients] = useState<{ email: string; data: Record<string, string> }[] | null>(null);
 
   const SPAM_TRIGGER_WORDS = [
     'free', 'win', 'winner', 'cash', 'money', 'urgent', 'act now', 'guarantee',
@@ -204,7 +207,14 @@ export const Mailer: React.FC = () => {
     
     let recipientList: string[] = [];
 
-    if (autoSyncVerified && window.electronAPI) {
+    // Mail Merge mode — use personalized recipients
+    if (mailMergeRecipients && mailMergeRecipients.length > 0) {
+      recipientList = mailMergeRecipients.map(r => r.email).filter(e => e?.includes('@'));
+      if (recipientList.length === 0) {
+        alert('No valid email addresses found in the mail merge data.');
+        return;
+      }
+    } else if (autoSyncVerified && window.electronAPI) {
       try {
         const verifiedRecords = await window.electronAPI.getEmails({ status: 'Active' });
         recipientList = verifiedRecords.map((r: any) => r.email).filter((e: string) => e?.includes('@'));
@@ -290,6 +300,17 @@ export const Mailer: React.FC = () => {
 
   return (
     <div key="mailer-root" className="space-y-6 animate-fade-in relative pb-12">
+      {showMailMerge && (
+        <MailMerge
+          onApply={(mergeSubject, mergeBody, recipients) => {
+            setSubject(mergeSubject);
+            setBody(mergeBody);
+            setMailMergeRecipients(recipients);
+            setAutoSyncVerified(false);
+          }}
+          onClose={() => setShowMailMerge(false)}
+        />
+      )}
       <div className="flex justify-between items-end">
         <div>
           <h1 className="text-2xl font-bold text-cyber-text flex items-center gap-2">
@@ -299,6 +320,21 @@ export const Mailer: React.FC = () => {
           <p className="text-sm text-gray-400 mt-1">Send campaigns with auto-rotation (1 email per minute)</p>
         </div>
         <div className="flex items-center gap-3">
+            <button
+              onClick={() => setShowMailMerge(true)}
+              className="px-3 py-1.5 bg-cyber-accent/10 border border-cyber-accent/30 text-cyber-accent rounded-lg text-xs font-semibold hover:bg-cyber-accent/20 transition-all flex items-center gap-1.5"
+            >
+              <GitMerge size={12} /> Mail Merge
+            </button>
+            {mailMergeRecipients && (
+              <div className="flex items-center gap-2 px-2 py-1 bg-green-500/10 border border-green-500/30 rounded-lg">
+                <CheckCircle2 size={12} className="text-green-400" />
+                <span className="text-xs text-green-400 font-medium">{mailMergeRecipients.length} merged recipients</span>
+                <button onClick={() => setMailMergeRecipients(null)} className="text-gray-500 hover:text-red-400 ml-1">
+                  <X size={10} />
+                </button>
+              </div>
+            )}
             <button 
             onClick={handleClearMemory}
             className="px-3 py-1 bg-red-500/10 border border-red-500/30 text-red-400 rounded-lg text-xs hover:bg-red-500/20 transition-all flex items-center gap-1.5"

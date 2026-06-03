@@ -75,6 +75,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   startMailing: (config: any) => ipcRenderer.invoke('start-mailing', config),
   stopMailing: () => ipcRenderer.invoke('stop-mailing'),
   exportCampaignReport: (reportPath: string) => ipcRenderer.invoke('export-campaign-report', reportPath),
+  parseMailMergeFile: () => ipcRenderer.invoke('parse-mailmerge-file'),
   onMailingEvent: (callback: (event: any, data: any) => void) => {
     ipcRenderer.on('mailing-event', callback);
     return () => ipcRenderer.removeListener('mailing-event', callback);

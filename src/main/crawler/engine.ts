@@ -2,6 +2,7 @@ import puppeteer, { Browser, Page } from 'puppeteer-core';
 import { EventEmitter } from 'events';
 import { addEmail, addDomain, incrementDomainPages, addLog, updateProxyStatus, deleteFailedProxies } from '../db/database';
 import { scoreEmailForMarketing } from '../utils/marketingValidator';
+import { isLikelyRealEmail, checkDomainDeliverability } from '../utils/emailValidator';
 // @ts-ignore
 import pdf from 'pdf-parse';
 import * as ExcelJS from 'exceljs';
@@ -460,37 +461,43 @@ export class ExtractionEngine extends EventEmitter {
 
     for (const email of uniqueEmails) {
       const emailLower = email.toLowerCase();
+
+      // Basic format check
+      if (!isLikelyRealEmail(emailLower)) continue;
+      if (email.includes('%') || email.includes(' ')) continue;
+      if (email.length > 80) continue;
+
+      const [, mailDomain] = emailLower.split('@');
+
+      // Skip asset/system domains
+      if (ASSET_EXTENSIONS.some(ext => emailLower.endsWith(ext))) continue;
+      if (BLACKLIST.some((b) => mailDomain.includes(b))) continue;
+
+      // MX record check — skip domains with no mail server
+      const hasMailServer = await checkDomainDeliverability(mailDomain);
+      if (!hasMailServer) {
+        this.emit('event', { type: 'info', message: `Skipped ${email} — no mail server on ${mailDomain}`, timestamp: new Date().toISOString() });
+        continue;
+      }
+
+      // Try to extract name from context
       let foundName = '';
       const emailIndex = text.indexOf(email);
       if (emailIndex !== -1) {
         const contextBefore = text.substring(Math.max(0, emailIndex - 100), emailIndex);
-        const nameMatch = contextBefore.match(/(?:Name|Contact|Owner|Attention):\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})/i) 
+        const nameMatch = contextBefore.match(/(?:Name|Contact|Owner|Attention):\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})/i)
                         || contextBefore.match(/([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})(?:\s*[<(\]|,]|$)/);
         if (nameMatch) foundName = nameMatch[1].trim();
       }
 
-      if (email.includes('%') || email.includes(' ') || email.includes('+')) continue;
-      
-      const [user, mailDomain] = emailLower.split('@');
-      if (ASSET_EXTENSIONS.some(ext => emailLower.endsWith(ext))) continue;
-      if (BLACKLIST.some((b) => mailDomain.includes(b))) continue;
-      if (BUSINESS_ROLES.some(role => user === role)) continue;
-      if (GOV_EXTENSIONS.some(ext => mailDomain.endsWith(ext))) continue;
-
-      const domainName = mailDomain.split('.')[0];
-      const isPersonalProvider = UNIVERSAL_PERSONAL_PROVIDERS.includes(mailDomain);
-      if (user === domainName && !isPersonalProvider) continue;
-
-      if (email.length > 80) continue;
-
-      // Score email for marketing quality (AI-powered free validation)
+      // Score email for marketing quality
       const marketingValidation = scoreEmailForMarketing(emailLower, mailDomain);
       
       const added = addEmail(email, mailDomain, sourceUrl, primaryPhone, foundName, marketingValidation.score, marketingValidation.isMarketingReady, marketingValidation.riskLevel);
       if (added) {
         this.emit('event', {
           type: 'email-found',
-          message: `Found: ${email}${marketingValidation.isMarketingReady ? ' ✓ (Marketing Ready)' : ' ⚠ (Risky for Marketing)'}`,
+          message: `Found: ${email}${marketingValidation.isMarketingReady ? ' ✓ (Marketing Ready)' : ' ⚠ (Risky)'}`,
           data: { id: Date.now(), email, domain: mailDomain, sourcePage: sourceUrl, phone: primaryPhone, name: foundName, status: 'pending', foundAt: new Date().toISOString(), marketingScore: marketingValidation.score, isMarketingReady: marketingValidation.isMarketingReady, marketingRisk: marketingValidation.riskLevel },
           timestamp: new Date().toISOString(),
         });
